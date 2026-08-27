@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    # Un paso que se cuelga no puede comerse el runner (ni los logs, que
+    # recién quedan disponibles cuando el job termina).
+    timeout-minutes: 20
+
+    # Los tests de dominio (transitionOrder, reservas, contador de pedidos)
+    # corren contra MySQL de verdad: FOR UPDATE y las transacciones no se
+    # pueden simular con un mock.
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ecom
+          MYSQL_USER: ecom
+          MYSQL_PASSWORD: ecom
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/ecom
+      TEST_DATABASE_URL: mysql://root:root@127.0.0.1:3306/ecom_test
+      SESSION_SECRET: ci-session-secret-de-al-menos-32-caracteres
+      # Sin esto, `next build` avisa que no puede resolver la URL absoluta de
+      # la imagen de Open Graph y cae en localhost. En la tienda real lo
+      # bloquea `pnpm preflight`; acá alcanza con un dominio de mentira, que
+      # es justamente lo que el código se niega a inventar por su cuenta
+      # (ver src/lib/site-url.ts).
+      NEXT_PUBLIC_SITE_URL: https://ci.example.py
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Sin `version:` a propósito: sale de "packageManager" en package.json,
+      # y declarar las dos hace fallar la action.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `POST /api/setup/init` deploya **migraciones**, no `schema.ts`: en el
+      # servidor no hay drizzle-kit y `db:push` no corre. O sea que una columna
+      # agregada a schema.ts sin su migración generada compila, pasa los tests
+      # (que también migran) y recién falla en producción, con la tienda arriba
+      # y la columna faltando. Acá se ve en el PR.
+      #
+      # El dev local sigue usando `pnpm db:push`; lo que se pide es que la
+      # migración esté generada y commiteada.
+      - name: schema.ts no se despegó de las migraciones
+        run: |
+          set -euo pipefail
+
+          pnpm db:generate
+
+          if [ -n "$(git status --porcelain drizzle)" ]; then
+            echo "::error::schema.ts cambió sin su migración. Corré \`pnpm db:generate\` y commiteá lo que aparezca en drizzle/."
+            git status --porcelain drizzle
+            git --no-pager diff -- drizzle
+            exit 1
+          fi
+
+          echo "✓ schema.ts y drizzle/ están al día"
+
+      - run: pnpm typecheck
+
+      - run: pnpm lint
+
+      - run: pnpm test
+        timeout-minutes: 8
+
+      - run: pnpm build
+
+  # El pin de "packageManager" es lo que hace reproducible el install, acá y en
+  # el contenedor de build de Hostinger. El problema del pin es que envejece
+  # callado: el día que Hostinger levanta su Corepack a la major siguiente, el
+  # lockfile deja de instalar y el error aparece en el deploy, no acá.
+  #
+  # Este job no actualiza nada —el pin se sube a mano, con su lockfile— pero
+  # falla el PR cuando la major pineada quedó atrás. Preferimos ese rojo, que
+  # se lee en 10 segundos, al de Hostinger.
+  pnpm-al-dia:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: La major de pnpm pineada sigue siendo la última
+        run: |
+          set -euo pipefail
+
+          pineado=$(node -p "require('./package.json').packageManager.replace(/^pnpm@/, '')")
+          ultimo=$(curl -fsS --retry 3 --retry-delay 2 https://registry.npmjs.org/pnpm/latest \
+            | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+
+          major_pineado=${pineado%%.*}
+          major_ultimo=${ultimo%%.*}
+
+          echo "packageManager: pnpm@$pineado (major $major_pineado)"
+          echo "registry:       pnpm@$ultimo (major $major_ultimo)"
+
+          # Sólo la major. Cada patch de pnpm rompería todos los PRs abiertos y
+          # el job se terminaría ignorando, que es peor que no tenerlo.
+          if [ "$major_pineado" -lt "$major_ultimo" ]; then
+            echo "::error::pnpm@$pineado está una major atrás de pnpm@$ultimo. Actualizá \"packageManager\" en package.json, corré \`pnpm install\` para regenerar el lockfile y commiteá los dos."
+            exit 1
+          fi
+
+          echo "✓ al día"

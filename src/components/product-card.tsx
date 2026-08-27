@@ -26,7 +26,7 @@ export function ProductCard({
   return (
     <Link
       href={`/producto/${product.slug}`}
-      className="group border-border hover:border-foreground/20 focus-visible:ring-ring flex flex-col rounded-xl border p-3 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+      className="group border-border hover:border-primary/40 focus-visible:ring-ring bg-card flex flex-col rounded-xl border p-3 shadow-sm transition-all hover:shadow-md focus-visible:ring-2 focus-visible:outline-none"
     >
       <ProductImage
         image={product.image}

@@ -24,6 +24,15 @@ En el hPanel, dentro del sitio:
    | Build command | `pnpm build` |
    | Start command | `pnpm start` |
 
+   **Trampa:** el hPanel tiene, aparte de estos tres campos, un selector propio
+   de **Package Manager** — y ese selector gana. Con `npm` elegido ahí, el
+   build corre `npm install` igual, ignora `pnpm-lock.yaml`, y con
+   `NODE_ENV=production` de fondo `npm install` ni siquiera trae las
+   devDependencies (`@tailwindcss/postcss`, `cloudinary`, `dotenv`…): el error
+   sale como si faltaran paquetes, cuando en realidad instaló con el gestor
+   equivocado. Poné ese selector en **pnpm** además del install command de
+   arriba.
+
 3. **Environment variables**: cargá una por una las de `.env.example` que la
    tienda necesita — `DATABASE_URL`, `SESSION_SECRET`, `CRON_SECRET`,
    `WHATSAPP_NUMBER`, `CLOUDINARY_*`, `NEXT_PUBLIC_SITE_URL`, `PAGOPAR_*` si va

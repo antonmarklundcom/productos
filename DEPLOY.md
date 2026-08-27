@@ -33,6 +33,15 @@ En el hPanel, dentro del sitio:
    equivocado. Poné ese selector en **pnpm** además del install command de
    arriba.
 
+   **Otra trampa, con el selector ya en pnpm:** el `packageManager` de
+   `package.json` fija una versión exacta (`pnpm@11.22.0`), y corepack en el
+   servidor de Hostinger la exige al pie de la letra — si el entorno trae una
+   versión de pnpm distinta (a veces más nueva) y corepack no puede
+   descargarla, el install falla antes de tocar una sola dependencia. Si el
+   log del build se queja de la versión de pnpm, subí el número en
+   `packageManager` para que coincida con la que reporta el entorno, no al
+   revés.
+
 3. **Environment variables**: cargá una por una las de `.env.example` que la
    tienda necesita — `DATABASE_URL`, `SESSION_SECRET`, `CRON_SECRET`,
    `WHATSAPP_NUMBER`, `CLOUDINARY_*`, `NEXT_PUBLIC_SITE_URL`, `PAGOPAR_*` si va

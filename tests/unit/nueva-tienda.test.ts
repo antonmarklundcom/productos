@@ -31,6 +31,31 @@ import {
 
 const TIENDA_REAL = readFileSync(path.join('src', 'config', 'tienda.ts'), 'utf8');
 
+/**
+ * El bloque de marca tal como lo deja el template, sin tocar.
+ *
+ * A diferencia de `TIENDA_REAL` —que lee el archivo vivo de este repo, y en
+ * una tienda que ya corrió `pnpm nueva-tienda` de verdad ya no tiene el
+ * placeholder— estos tres tests verifican el parseo contra un input fijo y
+ * conocido. Usar el archivo real acá haría que toda tienda que completó el
+ * wizard rompiera este test para siempre.
+ */
+const TIENDA_PLANTILLA = `
+export const MARCA_PLACEHOLDER = "TiendaPY";
+
+export const TIENDA: Tienda = {
+  nombre: MARCA_PLACEHOLDER,
+  titulo: "TiendaPY — Comprá online en Paraguay",
+  descripcion:
+    "Tienda online paraguaya. Precios en guaraníes, IVA incluido, envíos a todo el país y atención por WhatsApp.",
+  tagline: "Precios en guaraníes, IVA incluido. Enviamos a todo el país.",
+  lang: "es-PY",
+  ogLocale: "es_PY",
+  cuentasClientes: false,
+  hero: null,
+};
+`;
+
 const DATOS: DatosTienda = {
   nombre: 'Lencería Guaraní',
   titulo: 'Lencería Guaraní — Comprá online en Paraguay',
@@ -42,8 +67,8 @@ const DATOS: DatosTienda = {
 
 describe('leer la marca de tienda.ts', () => {
   it('lee los campos que son strings', () => {
-    expect(leerCampoTienda(TIENDA_REAL, 'titulo')).toContain('TiendaPY');
-    expect(leerCampoTienda(TIENDA_REAL, 'tagline')).toBe(
+    expect(leerCampoTienda(TIENDA_PLANTILLA, 'titulo')).toContain('TiendaPY');
+    expect(leerCampoTienda(TIENDA_PLANTILLA, 'tagline')).toBe(
       'Precios en guaraníes, IVA incluido. Enviamos a todo el país.',
     );
   });
@@ -51,7 +76,7 @@ describe('leer la marca de tienda.ts', () => {
   it('lee una descripción partida en varias líneas por prettier', () => {
     // El archivo real la tiene partida: si el lector se quedara con el primer
     // pedazo, la segunda corrida del wizard propondría media meta description.
-    expect(leerCampoTienda(TIENDA_REAL, 'descripcion')).toBe(
+    expect(leerCampoTienda(TIENDA_PLANTILLA, 'descripcion')).toBe(
       'Tienda online paraguaya. Precios en guaraníes, IVA incluido, envíos a todo el país y atención por WhatsApp.',
     );
   });
@@ -59,7 +84,7 @@ describe('leer la marca de tienda.ts', () => {
   it('el nombre del template no se lee como un valor: es una constante', () => {
     // `nombre: MARCA_PLACEHOLDER`. Devolver "TiendaPY" haría imposible
     // distinguir "todavía no lo renombraron" de "la tienda se llama TiendaPY".
-    expect(leerCampoTienda(TIENDA_REAL, 'nombre')).toBeNull();
+    expect(leerCampoTienda(TIENDA_PLANTILLA, 'nombre')).toBeNull();
   });
 });
 

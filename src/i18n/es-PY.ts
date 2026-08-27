@@ -34,6 +34,13 @@ export const esPY = {
   "footer.contacto": "Contacto",
   "footer.whatsapp": "WhatsApp {telefono}",
   "footer.seguirPedido": "Seguí tu pedido",
+  "footer.confianza.titulo": "Por qué comprar acá",
+  "footer.confianza.envios": "Envíos a todo el país",
+  "footer.confianza.pago": "Transferencia, QR o contra entrega",
+  "footer.confianza.iva": "Precios en guaraníes, IVA incluido",
+  "footer.derechos": "Todos los derechos reservados.",
+
+  "header.topbar.envios": "Envíos a todo el país",
 
   "whatsapp.flotante.label": "Escribinos por WhatsApp",
   "whatsapp.flotante.nav": "Contacto por WhatsApp",
@@ -49,6 +56,14 @@ export const esPY = {
   "home.categorias": "Categorías",
   "home.categorias.verTodo": "Ver todo →",
   "home.destacados": "Destacados",
+  "home.confianza.envios.titulo": "Envíos a todo el país",
+  "home.confianza.envios.texto": "Recibí tu pedido en Asunción y el interior.",
+  "home.confianza.pago.titulo": "Pagá como quieras",
+  "home.confianza.pago.texto": "Transferencia, QR o contra entrega.",
+  "home.confianza.whatsapp.titulo": "Atención por WhatsApp",
+  "home.confianza.whatsapp.texto": "Consultas y seguimiento de tu pedido.",
+  "home.confianza.iva.titulo": "IVA incluido",
+  "home.confianza.iva.texto": "El precio que ves es el que pagás.",
   "home.sinProductos":
     "Todavía no hay productos publicados. Sembrá el catálogo con pnpm db:seed.",
   "home.errorCatalogo": "No pude leer el catálogo:",

@@ -95,11 +95,11 @@ export type Hero = {
 export const MARCA_PLACEHOLDER = "TiendaPY";
 
 export const TIENDA: Tienda = {
-  nombre: MARCA_PLACEHOLDER,
-  titulo: "TiendaPY — Comprá online en Paraguay",
+  nombre: "Productos.com.py",
+  titulo: "Productos.com.py — Comprá online en Paraguay",
   descripcion:
-    "Tienda online paraguaya. Precios en guaraníes, IVA incluido, envíos a todo el país y atención por WhatsApp.",
-  tagline: "Precios en guaraníes, IVA incluido. Enviamos a todo el país.",
+    "Productos.com.py es tu tienda online en Paraguay: variedad de productos, envíos a todo el país y pago seguro contra entrega o transferencia.",
+  tagline: "Todo lo que buscás, en un solo lugar.",
   lang: "es-PY",
   ogLocale: "es_PY",
   cuentasClientes: false,

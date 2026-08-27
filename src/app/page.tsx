@@ -1,10 +1,14 @@
+import type { ComponentType } from "react";
+import Image from "next/image";
 import Link from "next/link";
+import { CreditCard, MessageCircle, Receipt, Truck } from "lucide-react";
 
 import { HomeHero } from "@/components/home-hero";
 import { ProductCard } from "@/components/product-card";
 import { TIENDA, type Hero } from "@/config/tienda";
 import { getCatalog, getCategories, type CatalogProduct } from "@/db/queries";
 import { t } from "@/i18n";
+import { categoryPlaceholderSrc } from "@/lib/images";
 
 /**
  * Home. ISR: el catálogo cambia poco y las redes móviles paraguayas
@@ -37,6 +41,16 @@ export default async function HomePage() {
       */}
       <HomeHero hero={TIENDA.hero ?? heroPorDefecto(categories[0]?.slug)} />
 
+      {/* Franja de confianza: en una tienda general, sin un rubro que hable
+          por sí solo, esto es lo que reemplaza al "ya sé qué venden acá" de
+          una tienda especializada. */}
+      <section className="mt-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <TrustBadge icon={Truck} titulo={t("home.confianza.envios.titulo")} texto={t("home.confianza.envios.texto")} />
+        <TrustBadge icon={CreditCard} titulo={t("home.confianza.pago.titulo")} texto={t("home.confianza.pago.texto")} />
+        <TrustBadge icon={MessageCircle} titulo={t("home.confianza.whatsapp.titulo")} texto={t("home.confianza.whatsapp.texto")} />
+        <TrustBadge icon={Receipt} titulo={t("home.confianza.iva.titulo")} texto={t("home.confianza.iva.texto")} />
+      </section>
+
       {error ? (
         <div className="border-border border-l-primary mt-8 rounded-lg border border-l-2 p-4">
           <p className="text-sm">{t("home.errorCatalogo")}</p>
@@ -53,10 +67,22 @@ export default async function HomePage() {
                   <Link
                     key={category.id}
                     href={`/categoria/${category.slug}`}
-                    className="border-border hover:border-foreground/30 rounded-xl border p-4 transition-colors"
+                    className="border-border hover:border-primary/40 hover:bg-accent/40 group flex items-center gap-3 rounded-xl border p-4 transition-colors"
                   >
-                    <p className="font-medium">{category.name}</p>
-                    <p className="text-muted-foreground mt-1 text-sm">{t("home.categorias.verTodo")}</p>
+                    <Image
+                      src={categoryPlaceholderSrc(category.slug)}
+                      alt=""
+                      aria-hidden
+                      width={40}
+                      height={40}
+                      className="size-10 shrink-0"
+                    />
+                    <div>
+                      <p className="font-medium">{category.name}</p>
+                      <p className="text-muted-foreground group-hover:text-foreground mt-1 text-sm">
+                        {t("home.categorias.verTodo")}
+                      </p>
+                    </div>
                   </Link>
                 ))}
               </div>
@@ -80,6 +106,26 @@ export default async function HomePage() {
         </>
       )}
     </main>
+  );
+}
+
+function TrustBadge({
+  icon: Icon,
+  titulo,
+  texto,
+}: {
+  icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  titulo: string;
+  texto: string;
+}) {
+  return (
+    <div className="border-border bg-card flex items-start gap-3 rounded-xl border p-4">
+      <Icon className="text-primary size-5 shrink-0" aria-hidden />
+      <div>
+        <p className="text-sm font-medium">{titulo}</p>
+        <p className="text-muted-foreground mt-0.5 text-xs">{texto}</p>
+      </div>
+    </div>
   );
 }
 

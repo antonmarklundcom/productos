@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense, cache } from "react";
@@ -7,6 +8,7 @@ import { CatalogFilters } from "@/components/catalog-filters";
 import { ProductCard } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { t, tPlural } from "@/i18n";
+import { categoryPlaceholderSrc } from "@/lib/images";
 import { parsePriceRange } from "@/lib/price-ranges";
 import { breadcrumbJsonLd, itemListJsonLd } from "@/lib/seo";
 import { siteOrigin } from "@/lib/site-url";
@@ -122,7 +124,17 @@ export default async function CategoryPage({
         <span className="text-foreground">{category.name}</span>
       </nav>
 
-      <h1 className="mt-2 text-2xl font-semibold tracking-tight">{category.name}</h1>
+      <div className="mt-2 flex items-center gap-3">
+        <Image
+          src={categoryPlaceholderSrc(category.slug)}
+          alt=""
+          aria-hidden
+          width={36}
+          height={36}
+          className="size-9 shrink-0"
+        />
+        <h1 className="text-2xl font-semibold tracking-tight">{category.name}</h1>
+      </div>
       <p className="text-muted-foreground mt-1 text-sm">
         {tPlural("catalogo.productos", result.total)} · {t("catalogo.ivaIncluidoNota")}
       </p>

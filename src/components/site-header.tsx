@@ -10,6 +10,7 @@ import { SearchBox } from "@/components/search-box";
 import { getCategories } from "@/db/queries";
 import { t } from "@/i18n";
 import { categoryPlaceholderSrc } from "@/lib/images";
+import { TESTIDS } from "@/lib/testids";
 
 export async function SiteHeader() {
   let categories: Awaited<ReturnType<typeof getCategories>> = [];
@@ -59,6 +60,8 @@ export async function SiteHeader() {
             <Link
               key={category.id}
               href={`/categoria/${category.slug}`}
+              data-testid={TESTIDS.headerCategoryLink}
+              data-slug={category.slug}
               className="hover:bg-accent hover:text-accent-foreground text-muted-foreground flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 transition-colors"
             >
               <Image

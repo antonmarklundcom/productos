@@ -92,6 +92,13 @@ const VariantSchema = z.object({
   pricePyg: z.number().int(t("adminForm.precioEntero")).nonnegative(),
   compareAtPyg: z.number().int().nonnegative().nullable().optional(),
   isActive: z.boolean(),
+  /**
+   * Punto de reposición por variante (O6). Vacío = `null` = el umbral global.
+   * El techo de 100.000 no es un número mágico: es lo que hace que un dedo
+   * pesado sobre el teclado no deje una variante marcada como "stock bajo"
+   * para siempre — el campo lo dibuja S10.
+   */
+  reorderPoint: z.number().int().nonnegative().max(100_000).nullable().optional(),
 });
 
 export async function saveProductVariant(input: unknown): Promise<AdminActionResult> {
@@ -110,6 +117,7 @@ export async function saveProductVariant(input: unknown): Promise<AdminActionRes
       pricePyg: parsed.data.pricePyg,
       compareAtPyg: parsed.data.compareAtPyg ?? null,
       isActive: parsed.data.isActive,
+      reorderPoint: parsed.data.reorderPoint ?? null,
     });
 
     revalidatePath(`/admin/productos/${parsed.data.productId}`);

@@ -58,6 +58,8 @@ reemplaza los pasos `db:seed` de arriba — ver la sección de abajo.
 | `pnpm nueva-tienda` | wizard de tienda nueva: marca, secretos, `.env.local` y el bloque de variables del hPanel. Idempotente; `--dry-run` no escribe nada — NEW-STORE.md §2 |
 | `pnpm importar:productos lista.csv` | el catálogo del comercio desde su planilla (formato del export del panel + columnas opcionales). Ensayo por defecto; `--aplicar` escribe, `--pisar-stock` pisa `on_hand` — NEW-STORE.md §4 |
 | `pnpm template:diff` | qué arreglos del template le faltan a esta tienda (`--marcar` para fijar el punto de partida) — NEW-STORE.md |
+| `pnpm template:sync` | trae a esta tienda la maquinaria del template, commit por commit — NEW-STORE.md |
+| `pnpm db:generate` | genera la migración de un cambio de schema |
 | `pnpm preflight` | qué falta para cobrar plata de verdad (webhook sin confirmar, `CRON_SECRET`, `PAGOPAR_MODE` en producción); sale con código 1 si algo es inseguro |
 
 ### `pnpm demo` — la tienda lista para mostrar

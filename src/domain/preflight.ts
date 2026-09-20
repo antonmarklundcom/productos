@@ -75,6 +75,15 @@ export function preflight(env: PreflightEnv = process.env): PreflightReport {
     checkCloudinary(env),
     checkWhatsApp(env),
     checkAvisoPedidoNuevo(env),
+    checkAvisoCliente(env, "confirmado", "WHATSAPP_CLOUD_TEMPLATE_CLIENTE_CONFIRMADO"),
+    checkAvisoCliente(env, "pagado", "WHATSAPP_CLOUD_TEMPLATE_CLIENTE_PAGADO"),
+    checkAvisoCliente(env, "enviado", "WHATSAPP_CLOUD_TEMPLATE_CLIENTE_ENVIADO"),
+    // O15. Advertencia, nunca bloqueo: sin esta plantilla la tienda cobra
+    // exactamente igual que antes — lo que pierde son los pedidos que vencen
+    // sin que nadie les haya dicho nada.
+    checkAvisoCliente(env, "recordatorio", "WHATSAPP_CLOUD_TEMPLATE_CLIENTE_RECORDATORIO"),
+    checkResumenDiario(env),
+    checkBackups(env),
     checkDatabaseUrl(env),
     checkSiteUrl(env),
   ];
@@ -551,6 +560,144 @@ function checkAvisoPedidoNuevo(env: PreflightEnv): PreflightCheck {
     id: "aviso_pedido_nuevo",
     severity: "ok",
     title: "Aviso de pedido nuevo",
+    detail: "configurado",
+  };
+}
+
+/**
+ * Copias de seguridad automáticas (O8).
+ *
+ * Advierte, no bloquea: una tienda puede cobrar perfectamente sin backups
+ * automáticos, y `pnpm backup` desde la máquina de Anton sigue existiendo.
+ * Pero es la advertencia que más caro sale ignorar de todo este archivo — con
+ * una tienda es un encogerse de hombros, con cuatro andando es lo que termina
+ * con el negocio.
+ *
+ * De lo que este control **no** puede saber nada es de la entrada de cron del
+ * hPanel: con Cloudinary configurado y sin la entrada, la ruta existe y nadie
+ * la llama nunca. Eso está en DEPLOY.md §5 y hay que mirarlo a mano.
+ */
+function checkBackups(env: PreflightEnv): PreflightCheck {
+  const faltan = ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"].filter(
+    (name) => value(env, name) === "",
+  );
+
+  if (faltan.length > 0) {
+    return {
+      id: "backups",
+      severity: "advierte",
+      title: "Copias de seguridad automáticas",
+      detail:
+        `sin Cloudinary (falta ${faltan.join(", ")}) no hay dónde guardar la copia diaria: ` +
+        "/api/cron/backup se saltea sola. Queda `pnpm backup` a mano desde tu máquina",
+    };
+  }
+
+  return {
+    id: "backups",
+    severity: "ok",
+    title: "Copias de seguridad automáticas",
+    detail: "Cloudinary configurado (falta verificar la entrada de cron del hPanel, DEPLOY.md §5)",
+  };
+}
+
+/**
+ * El resumen diario al dueño (O6).
+ *
+ * Advierte y no bloquea, como el resto de los avisos: no tenerlo no le impide
+ * vender a nadie. Pero se chequea aparte y con su propio texto porque lo que
+ * se pierde sin él es concreto y no se nota: los comprobantes sin revisar y
+ * los pedidos sin pagar se quedan quietos hasta que alguien abre el panel, y
+ * el motivo por el que este mensaje existe es que **nadie abre el panel a las
+ * ocho de la mañana**.
+ *
+ * `WHATSAPP_CLOUD_TEMPLATE_STOCK_DISPONIBLE` no se chequea acá: "avisame
+ * cuando haya stock" es opcional de verdad — sin ella, el formulario no
+ * aparece y no se pierde nada que la tienda estuviera esperando.
+ */
+function checkResumenDiario(env: PreflightEnv): PreflightCheck {
+  const template = value(env, "WHATSAPP_CLOUD_TEMPLATE_RESUMEN_DIARIO");
+  const cloudListo =
+    value(env, "WHATSAPP_CLOUD_PHONE_NUMBER_ID") !== "" &&
+    value(env, "WHATSAPP_CLOUD_ACCESS_TOKEN") !== "";
+  const destino = value(env, "WHATSAPP_NUMBER");
+
+  const faltan = [
+    ...(cloudListo ? [] : ["las credenciales de WhatsApp Cloud"]),
+    ...(template === "" ? ["WHATSAPP_CLOUD_TEMPLATE_RESUMEN_DIARIO"] : []),
+    ...(destino === "" ? ["WHATSAPP_NUMBER"] : []),
+  ];
+
+  if (faltan.length > 0) {
+    return {
+      id: "resumen_diario",
+      severity: "advierte",
+      title: "Resumen diario",
+      detail:
+        `el dueño no recibe el resumen diario: falta ${faltan.join(", ")}. ` +
+        "Los comprobantes por revisar y los pedidos sin pagar se quedan quietos hasta que " +
+        "alguien abra el panel",
+    };
+  }
+
+  return {
+    id: "resumen_diario",
+    severity: "ok",
+    title: "Resumen diario",
+    detail: "configurado (acordate de la entrada de cron diaria del hPanel, DEPLOY.md)",
+  };
+}
+
+/**
+ * Los tres avisos a la COMPRADORA (fase O3): confirmado, pagado, enviado.
+ *
+ * Advierte, no bloquea — igual que el aviso al comercio: cada uno es una
+ * decisión aparte de la tienda, y no tenerlos configurados no le impide
+ * vender. A diferencia del aviso al comercio, acá no hay `WHATSAPP_NUMBER`
+ * que chequear: el destino es el WhatsApp de cada compradora, que ya está en
+ * su pedido.
+ */
+function checkAvisoCliente(
+  env: PreflightEnv,
+  id: "confirmado" | "pagado" | "enviado" | "recordatorio",
+  templateVar: string,
+): PreflightCheck {
+  const template = value(env, templateVar);
+  const cloudListo =
+    value(env, "WHATSAPP_CLOUD_PHONE_NUMBER_ID") !== "" &&
+    value(env, "WHATSAPP_CLOUD_ACCESS_TOKEN") !== "";
+
+  const titulo = `Aviso a la compradora: ${id}`;
+
+  if (template === "") {
+    return {
+      id: `aviso_cliente_${id}`,
+      severity: "advierte",
+      title: titulo,
+      detail:
+        id === "recordatorio"
+          ? `${templateVar} vacío: las compradoras no reciben recordatorio de pago y el pedido ` +
+            "que se olvidaron vence sin que nadie les haya dicho nada"
+          : `${templateVar} vacío: la compradora no recibe este aviso. Sin plantilla no sale ` +
+            "ni por la consola de dev — es una decisión de esta tienda, no un default",
+    };
+  }
+
+  if (!cloudListo) {
+    return {
+      id: `aviso_cliente_${id}`,
+      severity: "advierte",
+      title: titulo,
+      detail:
+        `${templateVar} está cargado pero faltan las credenciales de WhatsApp Cloud: fuera de ` +
+        "producción sale por la consola del servidor, en producción no sale",
+    };
+  }
+
+  return {
+    id: `aviso_cliente_${id}`,
+    severity: "ok",
+    title: titulo,
     detail: "configurado",
   };
 }

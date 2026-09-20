@@ -16,6 +16,25 @@ import { Label } from "@/components/ui/label";
 import { describeIssue } from "@/lib/cart-issues";
 import { cartSubtotal, useCart } from "@/lib/cart-store";
 import { formatGs } from "@/lib/money";
+import { TESTIDS } from "@/lib/testids";
+
+/**
+ * Los medios de pago, en el orden en que se ofrecen.
+ *
+ * Escritos acá y no importados de `@/db/schema`: este archivo corre en el
+ * navegador y traerse drizzle sólo para conocer tres strings serían kilobytes
+ * de más en la pantalla que más importa. El enum del servidor sigue siendo el
+ * que manda — `submitCheckout` valida contra él.
+ */
+const PAGOS = ["transferencia", "contra_entrega", "tarjeta"] as const;
+type MedioDePago = (typeof PAGOS)[number];
+
+/** Título y aclaración de cada medio de pago. */
+const PAGO_TEXTOS: Record<MedioDePago, [string, string]> = {
+  transferencia: [t("checkout.pago.transferencia"), t("checkout.pago.transferencia.ayuda")],
+  contra_entrega: [t("checkout.pago.contraEntrega"), t("checkout.pago.contraEntrega.ayuda")],
+  tarjeta: [t("checkout.pago.tarjeta"), t("checkout.pago.tarjeta.ayuda")],
+};
 
 /**
  * Formulario de checkout.
@@ -51,12 +70,17 @@ export function CheckoutForm({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [docType, setDocType] = useState<"NINGUNO" | "CI" | "RUC">("NINGUNO");
-  const [paymentMethod, setPaymentMethod] = useState<"transferencia" | "contra_entrega" | "tarjeta">(
-    "transferencia"
-  );
+  const [paymentMethod, setPaymentMethod] = useState<MedioDePago>("transferencia");
   const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [isGift, setIsGift] = useState(false);
   const [city, setCity] = useState("");
+  /**
+   * El método de envío marcado. Es un **id**, nunca un precio: el precio lo
+   * resuelve el servidor en cada cotización y lo vuelve a resolver al
+   * confirmar. `null` = todavía no cotizamos, o esta tienda no configuró
+   * métodos y sólo existe el implícito.
+   */
+  const [shippingMethodId, setShippingMethodId] = useState<number | null>(null);
   const [quote, setQuote] = useState<(CartQuote & { itemsKey: string }) | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
   const quoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -79,6 +103,28 @@ export function CheckoutForm({
   const subtotal = cartSubtotal(lines);
 
   /**
+   * Los medios de pago que esta pantalla puede ofrecer: los que habilita el
+   * método de envío elegido, menos tarjeta si la tienda no tiene Pagopar.
+   *
+   * Es UX, no la defensa: `createOrder` vuelve a chequear que el método de
+   * envío acepte el medio de pago, adentro de su transacción. Esconder un
+   * radio no frena un POST armado a mano (ARCH.md §1 regla 2).
+   */
+  const opcionesDePago = (allowed: readonly MedioDePago[]): MedioDePago[] =>
+    PAGOS.filter((value) => allowed.includes(value) && (value !== "tarjeta" || pagoparEnabled));
+
+  /**
+   * Al cambiar de método de envío, el medio de pago que tenía marcado puede
+   * dejar de existir —elegir el courier nacional después de haber marcado
+   * contra entrega—. Se pasa al primero que sí valga en vez de dejar marcada
+   * una opción que el servidor va a rechazar al confirmar.
+   */
+  const ajustarPago = (allowed: readonly MedioDePago[]): void => {
+    const posibles = opcionesDePago(allowed);
+    setPaymentMethod((actual) => (posibles.includes(actual) ? actual : (posibles[0] ?? actual)));
+  };
+
+  /**
    * Cotización del envío, disparada por lo que hace la compradora al tipear la
    * ciudad y no por un efecto — mismo criterio que la revalidación del
    * carrito. Es sólo lectura y no crea nada (ver `quoteCartShipping`), así que
@@ -86,7 +132,12 @@ export function CheckoutForm({
    */
   const itemsKey = lines.map((line) => `${line.variantId}x${line.qty}`).join(",");
 
-  const requestQuote = (nextCity: string, delayMs = 400, code = couponApplied) => {
+  const requestQuote = (
+    nextCity: string,
+    delayMs = 400,
+    code = couponApplied,
+    methodId: number | null = shippingMethodId,
+  ) => {
     if (quoteTimer.current) clearTimeout(quoteTimer.current);
 
     const target = nextCity.trim();
@@ -105,10 +156,33 @@ export function CheckoutForm({
     const ticket = ++quoteTicket.current;
     setIsQuoting(true);
     quoteTimer.current = setTimeout(() => {
-      void quoteCartShipping({ items, city: target, couponCode: code || undefined })
+      void quoteCartShipping({
+        items,
+        city: target,
+        couponCode: code || undefined,
+        shippingMethodId: methodId ?? undefined,
+      })
         .then((result) => {
           if (ticket !== quoteTicket.current) return;
+
+          // El método que tenía marcado dejó de valer para esta ciudad (otra
+          // zona, o el dueño lo apagó). Se marca el primero válido y se vuelve
+          // a cotizar: el total que quedaría en pantalla salió con el método
+          // rechazado, y no es el que se va a cobrar.
+          const primero = result.methods[0];
+          if (result.shippingMethodRejection !== null && primero) {
+            setShippingMethodId(primero.id);
+            ajustarPago(primero.allowedPaymentMethods);
+            requestQuote(target, 0, code, primero.id);
+            return;
+          }
+
           setQuote(result.shipping ? { ...result, itemsKey } : null);
+          setShippingMethodId(result.shippingMethodId);
+          const elegido = result.methods.find(
+            (method) => method.id === result.shippingMethodId,
+          );
+          if (elegido) ajustarPago(elegido.allowedPaymentMethods);
           setIsQuoting(false);
         })
         .catch(() => {
@@ -125,6 +199,22 @@ export function CheckoutForm({
   const currentQuote = quote?.itemsKey === itemsKey ? quote : null;
   // Un total aceptado deja de valer si el carrito cambió debajo.
   const expectedTotal = quote?.itemsKey === itemsKey ? acceptedTotal : null;
+
+  /**
+   * El método marcado y lo que habilita. Sin cotización todavía —o en una
+   * tienda que no configuró métodos— quedan los tres medios de pago de
+   * siempre: el checkout de antes, sin una sola pantalla nueva.
+   */
+  const metodoElegido =
+    currentQuote?.methods.find((method) => method.id === shippingMethodId) ?? null;
+  const pagosVisibles = opcionesDePago(metodoElegido?.allowedPaymentMethods ?? PAGOS);
+  /**
+   * ¿Esta tienda tiene métodos de verdad, o sólo el implícito? Con el
+   * implícito no se dibuja ninguna pregunta nueva: es literalmente el envío a
+   * domicilio de siempre, y una sola opción no es una elección.
+   */
+  const metodosConfigurados =
+    currentQuote?.methods.some((method) => method.id !== null) ?? false;
 
   if (lines.length === 0) {
     return (
@@ -159,6 +249,8 @@ export function CheckoutForm({
             shipAddress: String(data.get("shipAddress") ?? ""),
             shipReference: String(data.get("shipReference") ?? ""),
             paymentMethod,
+            // El id, nunca el precio: el servidor lo re-valida y lo re-cotiza.
+            shippingMethodId: shippingMethodId ?? undefined,
             couponCode: couponApplied || undefined,
             marketingOptIn,
             isGift,
@@ -209,6 +301,7 @@ export function CheckoutForm({
           <Input
             id="customerName"
             name="customerName"
+            data-testid={TESTIDS.checkoutName}
             required
             minLength={3}
             defaultValue={prefill?.name ?? ""}
@@ -220,6 +313,7 @@ export function CheckoutForm({
           <Input
             id="customerPhone"
             name="customerPhone"
+            data-testid={TESTIDS.checkoutPhone}
             required
             defaultValue={prefill?.phone ?? ""}
             placeholder={t("checkout.whatsapp.placeholder")}
@@ -252,6 +346,7 @@ export function CheckoutForm({
           <select
             id="docType"
             name="docType"
+            data-testid={TESTIDS.checkoutDocType}
             value={docType}
             onChange={(event) => setDocType(event.target.value as typeof docType)}
             className="border-input bg-background h-9 rounded-md border px-3 text-sm"
@@ -266,7 +361,13 @@ export function CheckoutForm({
             <Label htmlFor="docNumber">
               {docType === "RUC" ? t("checkout.documento.rucLabel") : t("checkout.documento.ciLabel")}
             </Label>
-            <Input id="docNumber" name="docNumber" required inputMode="numeric" />
+            <Input
+              id="docNumber"
+              name="docNumber"
+              data-testid={TESTIDS.checkoutDocNumber}
+              required
+              inputMode="numeric"
+            />
           </div>
         ) : null}
       </div>
@@ -277,6 +378,7 @@ export function CheckoutForm({
           <Input
             id="shipCity"
             name="shipCity"
+            data-testid={TESTIDS.checkoutCity}
             required
             list="ciudades"
             autoComplete="address-level2"
@@ -303,7 +405,14 @@ export function CheckoutForm({
 
       <div className="grid gap-1.5">
         <Label htmlFor="shipAddress">{t("checkout.direccion")}</Label>
-        <Input id="shipAddress" name="shipAddress" required minLength={5} autoComplete="street-address" />
+        <Input
+          id="shipAddress"
+          name="shipAddress"
+          data-testid={TESTIDS.checkoutAddress}
+          required
+          minLength={5}
+          autoComplete="street-address"
+        />
       </div>
 
       <div className="grid gap-1.5">
@@ -311,45 +420,93 @@ export function CheckoutForm({
         <Input id="shipReference" name="shipReference" placeholder={t("checkout.referencia.placeholder")} />
       </div>
 
+      {/*
+        Cómo se entrega, antes de con qué se paga: es el método el que decide
+        qué medios de pago existen. Sólo se dibuja si la tienda configuró
+        métodos de verdad — con el implícito no hay nada que elegir.
+      */}
+      {metodosConfigurados && currentQuote ? (
+        <fieldset className="grid gap-2">
+          <legend className="mb-1 text-sm font-medium">{t("checkout.envio.pregunta")}</legend>
+          {currentQuote.methods.map((method) => (
+            <label
+              key={method.id ?? "implicito"}
+              className="border-border flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm"
+            >
+              <input
+                type="radio"
+                name="shippingMethodId"
+                data-testid={TESTIDS.checkoutShippingMethod}
+                data-slug={method.slug}
+                value={String(method.id ?? "")}
+                checked={shippingMethodId === method.id}
+                onChange={() => {
+                  setShippingMethodId(method.id);
+                  ajustarPago(method.allowedPaymentMethods);
+                  // Otro método es otro flete: lo que aceptó para el anterior
+                  // no vale más, y el total se vuelve a pedir sin debounce.
+                  setAcceptedTotal(null);
+                  requestQuote(city, 0, couponApplied, method.id);
+                }}
+                className="mt-1"
+              />
+              <span className="flex-1">
+                <span className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <span className="font-medium">{method.name}</span>
+                  <span className="tabular-nums">
+                    {method.isFree ? t("checkout.envioGratis") : formatGs(method.shippingPyg)}
+                  </span>
+                </span>
+                {method.description ? (
+                  <span className="text-muted-foreground block text-xs">{method.description}</span>
+                ) : null}
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
+
+      {/* Una tienda con métodos configurados y ninguno que llegue a esa
+          ciudad. Decirlo acá es mucho mejor que dejarla confirmar y recibir
+          el rechazo del servidor con el formulario entero completado. */}
+      {currentQuote && currentQuote.methods.length === 0 ? (
+        <p
+          role="alert"
+          className="border-destructive/40 text-destructive rounded-lg border p-3 text-sm"
+        >
+          {t("checkout.envio.sinMetodos")}
+        </p>
+      ) : null}
+
       <fieldset className="grid gap-2">
         <legend className="mb-1 text-sm font-medium">{t("checkout.pago.pregunta")}</legend>
-        {(
-          [
-            [
-              "transferencia",
-              t("checkout.pago.transferencia"),
-              t("checkout.pago.transferencia.ayuda"),
-            ],
-            [
-              "contra_entrega",
-              t("checkout.pago.contraEntrega"),
-              t("checkout.pago.contraEntrega.ayuda"),
-            ],
-            ...(pagoparEnabled
-              ? ([
-                  ["tarjeta", t("checkout.pago.tarjeta"), t("checkout.pago.tarjeta.ayuda")],
-                ] as const)
-              : []),
-          ] as const
-        ).map(([value, label, hint]) => (
-          <label
-            key={value}
-            className="border-border flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm"
-          >
-            <input
-              type="radio"
-              name="paymentMethod"
-              value={value}
-              checked={paymentMethod === value}
-              onChange={() => setPaymentMethod(value)}
-              className="mt-1"
-            />
-            <span>
-              <span className="font-medium">{label}</span>
-              <span className="text-muted-foreground block text-xs">{hint}</span>
-            </span>
-          </label>
-        ))}
+        {pagosVisibles.length === 0 ? (
+          <p className="text-muted-foreground text-sm">{t("checkout.pago.sinOpciones")}</p>
+        ) : null}
+        {pagosVisibles.map((value) => {
+          const [label, hint] = PAGO_TEXTOS[value];
+          return (
+            <label
+              key={value}
+              className="border-border flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm"
+            >
+              <input
+                type="radio"
+                name="paymentMethod"
+                data-testid={TESTIDS.checkoutPaymentMethod}
+                data-value={value}
+                value={value}
+                checked={paymentMethod === value}
+                onChange={() => setPaymentMethod(value)}
+                className="mt-1"
+              />
+              <span>
+                <span className="font-medium">{label}</span>
+                <span className="text-muted-foreground block text-xs">{hint}</span>
+              </span>
+            </label>
+          );
+        })}
       </fieldset>
 
       <div className="grid gap-2">
@@ -529,7 +686,10 @@ export function CheckoutForm({
                   : formatGs(currentQuote.shipping.shippingPyg)}
               </span>
             </div>
-            <div className="flex items-center justify-between pt-1">
+            <div
+              className="flex items-center justify-between pt-1"
+              data-testid={TESTIDS.checkoutTotal}
+            >
               <span className="font-medium">{t("checkout.total")}</span>
               <span className="text-base font-semibold tabular-nums">
                 {formatGs(currentQuote.totalPyg ?? 0)}
@@ -560,7 +720,12 @@ export function CheckoutForm({
         subtotalPyg={currentQuote?.subtotalPyg ?? subtotal}
       />
 
-      <Button type="submit" size="lg" disabled={isPending}>
+      <Button
+        type="submit"
+        size="lg"
+        data-testid={TESTIDS.checkoutSubmit}
+        disabled={isPending || pagosVisibles.length === 0 || currentQuote?.methods.length === 0}
+      >
         {isPending ? t("checkout.confirmando") : t("checkout.confirmar")}
       </Button>
     </form>

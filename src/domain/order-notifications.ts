@@ -8,7 +8,9 @@ import { formatGs } from "@/lib/money";
 import { siteOrigin } from "@/lib/site-url";
 
 import { resolveMessageSender, whatsappOwnerTemplate, type MessageSender } from "./messaging";
-import { recordOrderEvent } from "./order-events";
+import { motivoDeAviso, withTimeout } from "./notify-timing";
+import { NOTICE_REASON_PREFIX, recordOrderEvent } from "./order-events";
+import { log, mensajeDe } from '@/lib/log';
 
 /**
  * El aviso de pedido nuevo al comercio (fable/plan.md §5.2, F2 de la revisión).
@@ -77,6 +79,12 @@ export type NewOrderNotice = {
   customerName: string;
   totalPyg: number;
   paymentMethod: PaymentMethod;
+  /**
+   * Cómo hay que entregarlo (FASE 3). `null` en los pedidos anteriores a
+   * `shipping_methods` y en las tiendas que no configuraron métodos: ahí la
+   * línea no sale, en vez de salir vacía.
+   */
+  shippingMethodName?: string | null;
 };
 
 /**
@@ -94,26 +102,23 @@ export function newOrderNoticeBody(notice: NewOrderNotice): string {
     nombre: notice.customerName.trim(),
   });
 
+  // Cómo se entrega es la primera decisión del comercio al leer el aviso: si
+  // es retiro no hay nada que despachar, y si es la moto propia hay que
+  // salir. Sin método (pedido viejo, tienda sin configurar) no se inventa
+  // ninguna línea.
+  const envio = notice.shippingMethodName?.trim();
+  const lineas = [
+    linea,
+    ...(envio ? [t("wa.aviso.pedidoNuevo.envio", { metodo: envio })] : []),
+  ];
+
   const origin = siteOrigin();
-  if (!origin) return linea;
+  if (origin) {
+    const url = new URL(`/admin/pedidos/${notice.orderId}`, origin).toString();
+    lineas.push(t("wa.aviso.pedidoNuevo.url", { url }));
+  }
 
-  const url = new URL(`/admin/pedidos/${notice.orderId}`, origin).toString();
-  return `${linea}\n${t("wa.aviso.pedidoNuevo.url", { url })}`;
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`el envío pasó de ${ms} ms`)), ms).unref?.(),
-    ),
-  ]);
-}
-
-/** Motivo corto para `order_events.reason`: sin stack, sin número de nadie. */
-function motivo(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  return raw.replace(/\s+/g, " ").trim().slice(0, 120);
+  return lineas.join("\n");
 }
 
 /**
@@ -137,6 +142,7 @@ export async function notifyOwnerNewOrder(
         customerName: orders.customerName,
         totalPyg: orders.totalPyg,
         paymentMethod: orders.paymentMethod,
+        shippingMethodName: orders.shippingMethodName,
         status: orders.status,
       })
       .from(orders)
@@ -153,6 +159,7 @@ export async function notifyOwnerNewOrder(
       customerName: order.customerName,
       totalPyg: order.totalPyg,
       paymentMethod: order.paymentMethod,
+      shippingMethodName: order.shippingMethodName,
     });
 
     try {
@@ -163,21 +170,23 @@ export async function notifyOwnerNewOrder(
       await recordOrderEvent({
         orderId,
         status: order.status,
+        fromStatus: order.status,
         actor: "sistema",
-        reason: "aviso_dueno_enviado",
+        reason: `${NOTICE_REASON_PREFIX}dueno_enviado`,
       });
     } catch (error) {
-      console.error("notifyOwnerNewOrder: no se pudo avisar del pedido", error);
+      log.error('notifyOwnerNewOrder: no se pudo avisar del pedido', { error: mensajeDe(error) });
       await recordOrderEvent({
         orderId,
         status: order.status,
+        fromStatus: order.status,
         actor: "sistema",
-        reason: `aviso_dueno_fallido: ${motivo(error)}`.slice(0, 500),
+        reason: `${NOTICE_REASON_PREFIX}dueno_fallido: ${motivoDeAviso(error)}`.slice(0, 500),
       });
     }
   } catch (error) {
     // Último cinturón: si hasta el registro del fallo falla (la base se cayó
     // entre el commit y esto), el checkout **igual** no se entera.
-    console.error("notifyOwnerNewOrder falló entero", error);
+    log.error('notifyOwnerNewOrder falló entero', { error: mensajeDe(error) });
   }
 }

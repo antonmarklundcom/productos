@@ -155,10 +155,36 @@ const GUARD_ESPERADO: Readonly<Record<string, 'Admin' | 'Staff' | 'Owner'>> = {
   // Apagar una categoría le saca de la vidriera también a sus productos, y
   // cambiarle el slug rompe todas las URLs de esa sección que anden dando
   // vueltas. Un encargado no tiene por qué poder vaciar la tienda de un clic.
+  // Una nota de mostrador: los tres roles (capability `pedidos.notas`). Quien
+  // atiende el teléfono cuando la compradora llama es el vendedor, y esa nota
+  // es la que evita el segundo viaje de la moto. No mueve plata, no mueve
+  // stock, no cambia el estado y la compradora no la ve nunca.
+  addOrderNote: 'Admin',
+
+  // Editar un pedido sin pagar (O16): `Staff`, no `Admin`. La pantalla muestra
+  // totales, descuento y envío —montos que el vendedor no ve— y además los
+  // cambia. Es la misma línea que separa despachar de cobrar.
+  editPendingOrderAction: 'Staff',
+
+  // Acciones masivas (O7). Publicar, despublicar, mover de categoría y
+  // duplicar son trabajo de catálogo: `Staff`. El **ajuste de precios** es
+  // `Owner`, y es la única distinción que importa acá: es lo único de este
+  // grupo que mueve plata, el error no se ve y no se puede deshacer con un
+  // botón. La vista previa también es Owner porque muestra precios.
+  bulkSetProductsActive: 'Staff',
+  bulkMoveProductsCategory: 'Staff',
+  duplicateProductAction: 'Staff',
+  bulkAdjustProductPrices: 'Owner',
+  previewBulkPriceAdjustment: 'Owner',
+
   crearCategoria: 'Owner',
   editarCategoria: 'Owner',
   cambiarEstadoCategoria: 'Owner',
   moverCategoria: 'Owner',
+  // La foto de una categoría es la portada de una sección entera de la
+  // vidriera, y la subida pisa el asset anterior: mismo dueño que el resto del
+  // ABM de categorías.
+  uploadCategoryImage: 'Owner',
 
   // A qué cuenta transfieren las compradoras. Quien lo puede cambiar puede
   // desviar la facturación entera a otra cuenta sin dejar un pedido raro ni un
@@ -174,6 +200,14 @@ const GUARD_ESPERADO: Readonly<Record<string, 'Admin' | 'Staff' | 'Owner'>> = {
   editarZonaEnvio: 'Owner',
   cambiarEstadoZonaEnvio: 'Owner',
   moverZonaEnvio: 'Owner',
+
+  // Las formas de entrega deciden además con qué se puede pagar: un método mal
+  // configurado habilita contra entrega en ciudades donde nadie del comercio
+  // va a estar en la puerta para cobrar. Mismo dueño, mismo motivo.
+  crearMetodoEnvio: 'Owner',
+  editarMetodoEnvio: 'Owner',
+  cambiarEstadoMetodoEnvio: 'Owner',
+  moverMetodoEnvio: 'Owner',
 };
 
 describe('cada acción llama al guard que le corresponde', () => {

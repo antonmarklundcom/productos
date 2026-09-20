@@ -16,6 +16,7 @@ import { comercioWaLink, getDatosBancarios } from "@/lib/comercio";
 import { formatGs, formatGsPlain } from "@/lib/money";
 import { ORDER_STATUS_LABEL_COMPRADOR } from "@/lib/order-labels";
 import { formatDateTimePY } from "@/lib/py";
+import { TESTIDS } from "@/lib/testids";
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +75,12 @@ export default async function OrderPage({
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-8">
       <p className="text-muted-foreground text-sm">{t("pedido.etiqueta")}</p>
-      <h1 className="text-2xl font-semibold tracking-tight">{order.orderNumber}</h1>
+      <h1
+        className="text-2xl font-semibold tracking-tight"
+        data-testid={TESTIDS.orderConfirmationNumber}
+      >
+        {order.orderNumber}
+      </h1>
       <p className="mt-1 text-sm">
         {t("pedido.estado")} <strong>{ORDER_STATUS_LABEL_COMPRADOR[order.status]}</strong>
       </p>
@@ -189,7 +195,16 @@ export default async function OrderPage({
           <dt className="text-muted-foreground">{t("pedido.envio")}</dt>
           <dd className="text-right tabular-nums">{formatGs(order.shippingPyg)}</dd>
           <dt className="font-medium">{t("pedido.total")}</dt>
-          <dd className="text-right font-semibold tabular-nums">{formatGs(order.totalPyg)}</dd>
+          {/* == S17 == data-testid nuevo: el total de la compradora vuelve a
+              cambiar cuando el staff edita el pedido antes de que se pague
+              (O16), y el e2e de la edición necesita leerlo sin adivinar el
+              markup. */}
+          <dd
+            data-testid={TESTIDS.pedidoTotal}
+            className="text-right font-semibold tabular-nums"
+          >
+            {formatGs(order.totalPyg)}
+          </dd>
           <dt className="text-muted-foreground text-xs">{t("pedido.iva10")}</dt>
           <dd className="text-muted-foreground text-right text-xs tabular-nums">
             {formatGs(order.iva10Pyg)}
@@ -219,6 +234,38 @@ export default async function OrderPage({
           ) : null}
         </p>
       </section>
+
+      {/* Sólo si el pedido tiene courier/guía cargados (plan-operacion §6.1):
+          los pedidos que no pasaron por `enviado` con tracking no muestran
+          una sección vacía. Es distinto del historial de estados de abajo,
+          que siempre existe. */}
+      {order.trackingCarrier || order.trackingCode || order.trackingUrl ? (
+        <section className="mt-6" data-testid={TESTIDS.pedidoTrackingBlock}>
+          <h2 className="font-medium">{t("pedido.tracking.titulo")}</h2>
+          <p className="text-muted-foreground mt-1 text-sm">
+            {order.trackingCarrier && order.trackingCode
+              ? t("pedido.tracking.courierYguia", {
+                  courier: order.trackingCarrier,
+                  guia: order.trackingCode,
+                })
+              : order.trackingCarrier
+                ? t("pedido.tracking.soloCourier", { courier: order.trackingCarrier })
+                : order.trackingCode
+                  ? t("pedido.tracking.soloGuia", { guia: order.trackingCode })
+                  : null}
+          </p>
+          {order.trackingUrl ? (
+            <a
+              href={order.trackingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border-border mt-2 inline-flex rounded-lg border px-4 py-2 text-sm"
+            >
+              {t("pedido.tracking.verEnvio")}
+            </a>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="mt-6">
         <h2 className="font-medium">{t("pedido.seguimiento")}</h2>

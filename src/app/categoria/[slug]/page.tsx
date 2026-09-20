@@ -6,9 +6,11 @@ import { Suspense, cache } from "react";
 
 import { CatalogFilters } from "@/components/catalog-filters";
 import { ProductCard } from "@/components/product-card";
+import { ProductDescription } from "@/components/product-description";
 import { Button } from "@/components/ui/button";
 import { t, tPlural } from "@/i18n";
-import { categoryPlaceholderSrc } from "@/lib/images";
+import { categoryPlaceholderSrc, productImageUrl } from "@/lib/images";
+import { markdownToText } from "@/lib/markdown";
 import { parsePriceRange } from "@/lib/price-ranges";
 import { breadcrumbJsonLd, itemListJsonLd, jsonLdScript } from "@/lib/seo";
 import { siteOrigin } from "@/lib/site-url";
@@ -41,10 +43,23 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const { slug } = await params;
   const category = await loadCategory(slug).catch(() => null);
   if (!category) return { title: t("categoria.meta") };
-  return {
-    title: category.name,
-    description: t("categoria.metaDescripcion", { nombre: category.name }),
-  };
+
+  // `markdownToText`: la descripción acepta markdown (O7), y una que empiece
+  // con `**Importado**` publicaría literalmente los asteriscos en el
+  // resultado de Google — mismo motivo que en `producto/[slug]`.
+  const description =
+    markdownToText(category.description).slice(0, 160) ||
+    t("categoria.metaDescripcion", { nombre: category.name });
+
+  // == S17 == `alternates.canonical` a la URL sin query: `/categoria/slug`
+  // siempre es la misma página sin importar `?orden=` o `?precio=`, y sin eso
+  // Google indexaba cada combinación de filtros como si fuera contenido
+  // distinto. `siteOrigin()` devuelve `null` sin `NEXT_PUBLIC_SITE_URL` — sin
+  // origen conocido no se emite nada inventado (plan-crecimiento.md §6.1 F).
+  const origin = siteOrigin();
+  const canonical = origin ? new URL(`/categoria/${slug}`, origin).toString() : undefined;
+
+  return { title: category.name, description, ...(canonical ? { alternates: { canonical } } : {}) };
 }
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -65,6 +80,10 @@ export default async function CategoryPage({
   // Ver la nota en producto/[slug]: el 404 tiene que decidirse acá, y por eso
   // esta ruta tampoco lleva loading.tsx.
   if (!category) notFound();
+
+  // `null` sin `CLOUDINARY_CLOUD_NAME` o sin foto cargada — la página cae al
+  // encabezado de texto de siempre (plan-operacion §6.3).
+  const categoryImageUrl = productImageUrl(category.imageCloudinaryId, "hero");
 
   const sortParam = first(query.orden);
   const { min, max } = parsePriceRange(first(query.precio));
@@ -139,6 +158,32 @@ export default async function CategoryPage({
         {tPlural("catalogo.productos", result.total)} · {t("catalogo.ivaIncluidoNota")}
       </p>
 
+      {/* Sin foto ni descripción cargadas (O7, `/admin/categorias`), esta
+          página queda exactamente igual que antes de esta sección. */}
+      {categoryImageUrl || category.description ? (
+        <div className="mt-5">
+          {categoryImageUrl ? (
+            <div className="bg-muted relative aspect-[16/5] w-full overflow-hidden rounded-xl">
+              <Image
+                src={categoryImageUrl}
+                alt={category.imageAlt ?? category.name}
+                fill
+                unoptimized
+                priority
+                sizes="(max-width: 1024px) 100vw, 1152px"
+                className="object-cover"
+              />
+            </div>
+          ) : null}
+          {category.description ? (
+            <ProductDescription
+              markdown={category.description}
+              className={categoryImageUrl ? "mt-4" : undefined}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="mt-5">
         <Suspense fallback={null}>
           <CatalogFilters brands={brands} />
@@ -168,22 +213,38 @@ export default async function CategoryPage({
 
       {result.totalPages > 1 ? (
         <nav className="mt-8 flex items-center justify-center gap-3" aria-label={t("nav.paginacion")}>
-          <Button asChild variant="outline" size="sm" disabled={result.page <= 1}>
-            <Link href={buildPageHref(result.page - 1)} aria-disabled={result.page <= 1}>
+          {/* == S17 == En los bordes, un `<span aria-disabled>` con el mismo
+              estilo del botón deshabilitado — no un `<Link>`: un `<a href>`
+              sigue siendo clickeable (y navegable con teclado) aunque el
+              `Button` que lo envuelve diga `disabled`, que es justo lo que
+              pasaba acá antes de este PR. */}
+          {result.page > 1 ? (
+            <Button asChild variant="outline" size="sm">
+              <Link href={buildPageHref(result.page - 1)}>{t("nav.anterior")}</Link>
+            </Button>
+          ) : (
+            <span
+              aria-disabled="true"
+              className="border-input text-muted-foreground pointer-events-none rounded-md border px-3 py-1.5 text-sm opacity-50"
+            >
               {t("nav.anterior")}
-            </Link>
-          </Button>
+            </span>
+          )}
           <span className="text-muted-foreground text-sm">
             {t("nav.pagina", { actual: result.page, total: result.totalPages })}
           </span>
-          <Button asChild variant="outline" size="sm" disabled={result.page >= result.totalPages}>
-            <Link
-              href={buildPageHref(result.page + 1)}
-              aria-disabled={result.page >= result.totalPages}
+          {result.page < result.totalPages ? (
+            <Button asChild variant="outline" size="sm">
+              <Link href={buildPageHref(result.page + 1)}>{t("nav.siguiente")}</Link>
+            </Button>
+          ) : (
+            <span
+              aria-disabled="true"
+              className="border-input text-muted-foreground pointer-events-none rounded-md border px-3 py-1.5 text-sm opacity-50"
             >
               {t("nav.siguiente")}
-            </Link>
-          </Button>
+            </span>
+          )}
         </nav>
       ) : null}
     </main>

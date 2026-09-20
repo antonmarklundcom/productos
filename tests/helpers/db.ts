@@ -28,6 +28,14 @@ export async function closeTestDb(): Promise<void> {
 }
 
 const TABLES = [
+  // O5: las cinco tablas nuevas de plan-operacion §2. Van primero las que
+  // cuelgan de algo (FK cascade) para no depender del orden de borrado, igual
+  // que el resto de la lista.
+  'order_notes',
+  'refunds',
+  'price_adjustments',
+  'stock_alerts',
+  'job_runs',
   'order_events',
   'stock_reservations',
   'receipts',
@@ -41,6 +49,8 @@ const TABLES = [
   'products',
   'categories',
   'shipping_zones',
+  // Después de `orders`, que la referencia con FK (shipping_method_id).
+  'shipping_methods',
   // Antes que `users`, que la referencia con FK (updated_by).
   'bank_details',
   'users',

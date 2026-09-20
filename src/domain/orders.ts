@@ -12,6 +12,8 @@ import {
 
 import type { Executor, Tx } from './executor';
 import { recordManualPayment } from './manual-payments';
+import { notifyCustomerOrderEvent, type CustomerNoticeKind } from './order-customer-notifications';
+import { log, mensajeDe } from '@/lib/log';
 
 /**
  * Máquina de estados del pedido (ARCH.md §3).
@@ -24,12 +26,14 @@ import { recordManualPayment } from './manual-payments';
 export const ORDER_TRANSITIONS: Readonly<Record<OrderStatus, readonly OrderStatus[]>> = {
   pendiente_pago: ['esperando_verificacion', 'pagado', 'vencido', 'cancelado'],
   esperando_verificacion: ['pagado', 'rechazado', 'cancelado'],
-  // Comprobante inválido: el comprador puede reintentar.
-  rechazado: ['pendiente_pago', 'cancelado'],
+  // Reintento de comprobante, dar por cobrado desde el panel, vencimiento por cron o cancelación.
+  rechazado: ['esperando_verificacion', 'pagado', 'vencido', 'cancelado'],
   pagado: ['preparando', 'reembolsado'],
   preparando: ['enviado', 'reembolsado'],
-  enviado: ['entregado'],
-  entregado: [],
+  // Devolución total de un pedido ya despachado; el stock no vuelve solo:
+  // la mercadería devuelta se repone con un ajuste de stock manual, auditado.
+  enviado: ['entregado', 'reembolsado'],
+  entregado: ['reembolsado'],
   // `vencido → pagado` es la recuperación del pago tardío (ARCH.md §4.1): el
   // cron venció el pedido y el aviso de Pagopar llegó un segundo después. La
   // arista existe, pero entrar a `pagado` re-asegura el stock primero, así que
@@ -53,6 +57,19 @@ export const PRE_PAYMENT_STATUSES: readonly OrderStatus[] = [
 const CONSUMES_STOCK: readonly OrderStatus[] = ['pagado'];
 /** Al entrar acá las reservas se sueltan. */
 const RELEASES_STOCK: readonly OrderStatus[] = ['vencido', 'cancelado'];
+
+/**
+ * A qué destino le corresponde avisarle a la compradora (fase O3).
+ *
+ * Entrar a `pagado` cubre los tres caminos por los que llega la plata
+ * (transferencia aprobada, Pagopar, contra entrega confirmada): los tres
+ * pasan por acá, así que un solo mapeo alcanza para los tres sin tocar cada
+ * llamador. `enviado` sólo se entra desde el panel (`advanceOrder`).
+ */
+const CUSTOMER_NOTICE_FOR_STATUS: Partial<Record<OrderStatus, CustomerNoticeKind>> = {
+  pagado: 'pagado',
+  enviado: 'enviado',
+};
 
 export class OrderNotFoundError extends Error {
   constructor(readonly orderId: number) {
@@ -80,6 +97,24 @@ export class StockUnavailableError extends Error {
         `unidad(es) de una de las variantes. Si el pago entró, hay que devolverlo.`,
     );
     this.name = 'StockUnavailableError';
+  }
+}
+
+/**
+ * Se mandó seguimiento del envío en una transición que no es `→ enviado`.
+ *
+ * Es un error de programación, no de la persona del panel, y por eso frena en
+ * vez de ignorar el dato: aceptarlo en silencio dejaría la guía escrita en un
+ * pedido `preparando` —o peor, en uno `cancelado`— y la compradora recibiría
+ * después el aviso de envío con el número de otra cosa.
+ */
+export class TrackingNotAllowedError extends Error {
+  constructor(
+    readonly orderId: number,
+    readonly to: OrderStatus,
+  ) {
+    super(`El seguimiento del envío sólo se puede cargar al despachar, no al pasar a "${to}".`);
+    this.name = 'TrackingNotAllowedError';
   }
 }
 
@@ -121,7 +156,43 @@ export type TransitionOptions = {
    * `actor` (el string) sigue siendo obligatorio y no cambia.
    */
   actorUserId?: number | null;
+  /**
+   * Seguimiento del envío, **sólo** con `to === 'enviado'` (plan-operacion
+   * §5.1). Cualquier otro destino con esto puesto tira
+   * `TrackingNotAllowedError`.
+   *
+   * Se escribe en `orders` en la misma transacción que el cambio de estado, y
+   * no en un `UPDATE` posterior desde la acción: son la misma decisión del
+   * mostrador —"esto salió, con este courier y esta guía"— y partirla en dos
+   * escrituras crea el estado imposible de un pedido despachado sin guía
+   * cuando la segunda falla.
+   *
+   * Los tres campos son opcionales entre sí: una moto propia despacha sin
+   * número de guía, y un courier puede no dar link de seguimiento.
+   */
+  tracking?: OrderTracking;
 };
+
+/** Lo que el panel carga al despachar. Validado en `src/lib/schemas.ts`. */
+export type OrderTracking = {
+  carrier?: string | null;
+  code?: string | null;
+  url?: string | null;
+};
+
+/**
+ * Los tres campos, normalizados para el UPDATE: `""` y `undefined` entran como
+ * NULL. Sin esto, "despachar sin guía" dejaría la columna en cadena vacía y
+ * cada lector tendría que acordarse de tratarla como ausente.
+ */
+function trackingColumns(tracking: OrderTracking) {
+  const limpio = (valor: string | null | undefined): string | null => valor?.trim() || null;
+  return {
+    trackingCarrier: limpio(tracking.carrier),
+    trackingCode: limpio(tracking.code),
+    trackingUrl: limpio(tracking.url),
+  };
+}
 
 /**
  * Cambia el estado de un pedido.
@@ -141,6 +212,13 @@ export async function transitionOrder(
   reason?: string | null,
   options: TransitionOptions = {},
 ): Promise<TransitionResult> {
+  // Antes de abrir nada: el seguimiento sólo tiene sentido al despachar. Se
+  // chequea acá arriba y no adentro de la transacción porque no depende del
+  // estado de la base — es la forma del llamado la que está mal.
+  if (options.tracking && to !== 'enviado') {
+    throw new TrackingNotAllowedError(orderId, to);
+  }
+
   const run = async (tx: Tx | Executor): Promise<TransitionResult> => {
     const locked = await tx
       .select({
@@ -196,6 +274,10 @@ export async function transitionOrder(
       .set({
         status: to,
         ...(to === 'pagado' ? { paidAt: new Date() } : {}),
+        // El seguimiento viaja en este mismo UPDATE, dentro de la misma
+        // transacción: o el pedido queda despachado con su guía, o no queda
+        // despachado. Ver `TransitionOptions.tracking`.
+        ...(options.tracking ? trackingColumns(options.tracking) : {}),
       })
       .where(and(eq(orders.id, orderId), eq(orders.status, from)));
 
@@ -211,7 +293,30 @@ export async function transitionOrder(
     return { orderId, from, to, changed: true };
   };
 
-  return options.executor ? run(options.executor) : getDb().transaction(run);
+  const result = await (options.executor ? run(options.executor) : getDb().transaction(run));
+
+  // Aviso a la compradora (fase O3), sin `await` y después de que la
+  // transición ya corrió: nunca puede demorar ni hacer fallar la transición
+  // que la dispara. `notifyCustomerOrderEvent` no tira nunca — atrapa todo
+  // adentro y lo anota en `order_events` (ver order-customer-notifications.ts).
+  //
+  // Con `options.executor` (llamado adentro de la transacción de quien
+  // llama, p. ej. `reviewReceipt`, `retryOrderRevival`, el webhook de
+  // Pagopar), esto puede correr una fracción de segundo antes de que esa
+  // transacción externa haga commit: `notifyCustomerOrderEvent` usa su propia
+  // conexión (nunca `tx`). Su SELECT común no espera el lock de fila y puede
+  // leer el snapshot anterior; pasamos el destino para el evento del aviso.
+  const kind = result.changed ? CUSTOMER_NOTICE_FOR_STATUS[to] : undefined;
+  if (kind) {
+    void notifyCustomerOrderEvent(orderId, kind, {
+      status: to,
+      note: kind === 'enviado' ? (reason ?? null) : null,
+    }).catch((error) => {
+      log.error('notifyCustomerOrderEvent rechazó', { error: mensajeDe(error) });
+    });
+  }
+
+  return result;
 }
 
 /**
@@ -345,9 +450,10 @@ async function consumeReservations(tx: Executor, orderId: number): Promise<void>
   for (const reservation of held) {
     await tx
       .update(variants)
-      // GREATEST(...,0): on_hand es UNSIGNED. Si un ajuste manual de stock dejó
-      // menos de lo reservado, preferimos 0 antes que abortar el cobro.
-      .set({ onHand: sql`GREATEST(${variants.onHand} - ${reservation.qty}, 0)` })
+      // on_hand es UNSIGNED: GREATEST solo no alcanza porque la resta se evalúa
+      // antes y puede fallar. Casteamos a SIGNED para dejar 0 si un ajuste de
+      // stock dejó menos de lo reservado, sin abortar el cobro.
+      .set({ onHand: sql`GREATEST(CAST(${variants.onHand} AS SIGNED) - ${reservation.qty}, 0)` })
       .where(eq(variants.id, reservation.variantId));
 
     await tx

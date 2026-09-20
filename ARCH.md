@@ -72,7 +72,9 @@ Tres roles, tres niveles de confianza. El de abajo nunca puede lo del de arriba.
 |---|:---:|:---:|:---:|
 | Ver pedidos y su ficha | ✅ | ✅ | ✅ |
 | Preparar / despachar / entregar | ✅ | ✅ | ✅ |
+| Escribir notas internas en un pedido | ✅ | ✅ | ✅ |
 | Dar por cobrado, cancelar, vencer, rechazar | ✅ | ✅ | ❌ |
+| Editar un pedido sin pagar (cantidades, dirección) | ✅ | ✅ | ❌ |
 | Ver montos (totales, IVA, precios) | ✅ | ✅ | ❌ |
 | Comprobantes: ver, aprobar, rechazar | ✅ | ✅ | ❌ |
 | Productos y variantes (ABM) | ✅ | ✅ | ❌ |
@@ -80,16 +82,20 @@ Tres roles, tres niveles de confianza. El de abajo nunca puede lo del de arriba.
 | Resumen de ventas (`/admin`) | ✅ | ✅ | ❌ |
 | Listado de clientes | ✅ | ✅ | ❌ |
 | Registrar una devolución | ✅ | ❌ | ❌ |
+| Cambiar precios en masa por porcentaje | ✅ | ❌ | ❌ |
 | Exports CSV | ✅ | ❌ | ❌ |
 | Gestión de usuarios del panel | ✅ | ❌ | ❌ |
 | Cupones (ABM) | ✅ | ❌ | ❌ |
 | Categorías (ABM) | ✅ | ❌ | ❌ |
 | Zonas de envío (ABM) | ✅ | ❌ | ❌ |
+| Formas de entrega (ABM) | ✅ | ❌ | ❌ |
 | Datos bancarios de la tienda | ✅ | ❌ | ❌ |
 
-Lo que el `owner` no delega tiene siempre el mismo motivo: **el error no se ve y no se puede deshacer**. Una devolución es plata que sale y nadie la revisa después; un CSV es la base de clientes del comercio en un archivo que se lleva quien renuncia; repartir accesos es repartir todo lo anterior. Los tres ABMs que se sumaron en la FASE 2 son de la misma familia: un cupón mal puesto se descubre cuando ya lo usaron cien personas, apagar una categoría le saca de la vidriera a todos sus productos de una vez, y una zona de envío con el precio viejo cobra de menos en cada pedido sin romper nada, sin dejar log y sin que nadie se entere hasta cerrar el mes. Los datos bancarios (FASE 2, PR T) son el caso más puro de la familia: quien puede cambiar el número de cuenta al que transfieren las compradoras desvía la facturación entera a otra cuenta sin generar un solo pedido raro — la tienda sigue andando igual y el dueño se entera cuando mira su banco.
+Lo que el `owner` no delega tiene siempre el mismo motivo: **el error no se ve y no se puede deshacer**. Una devolución es plata que sale y nadie la revisa después; un CSV es la base de clientes del comercio en un archivo que se lleva quien renuncia; repartir accesos es repartir todo lo anterior. Los tres ABMs que se sumaron en la FASE 2 son de la misma familia: un cupón mal puesto se descubre cuando ya lo usaron cien personas, apagar una categoría le saca de la vidriera a todos sus productos de una vez, y una zona de envío con el precio viejo cobra de menos en cada pedido sin romper nada, sin dejar log y sin que nadie se entere hasta cerrar el mes. Las formas de entrega (FASE 3) entran en la misma familia y por partida doble: además del flete, deciden **con qué se puede pagar**, así que un método mal configurado habilita contra entrega en ciudades donde nadie del comercio va a ir a cobrar — y eso se descubre con el repartidor en la puerta, no en una pantalla. Los datos bancarios (FASE 2, PR T) son el caso más puro de la familia: quien puede cambiar el número de cuenta al que transfieren las compradoras desvía la facturación entera a otra cuenta sin generar un solo pedido raro — la tienda sigue andando igual y el dueño se entera cuando mira su banco.
 
-Lo que queda afuera del `vendedor` es todo lo que mueve plata o suelta stock. Le queda el mostrador: ver qué hay que armar y marcarlo despachado.
+Editar un pedido sin pagar (O16, capability `pedidos.editar`) está del lado de `staff` y no del vendedor por la misma línea que separa despachar de cobrar: la pantalla muestra totales, descuento y envío —montos que su rol no ve— y además los **cambia**.
+
+Lo que queda afuera del `vendedor` es todo lo que mueve plata o suelta stock. Le queda el mostrador: ver qué hay que armar y marcarlo despachado — y, desde O5, dejar la nota de lo que le dijeron por teléfono (`pedidos.notas`). Una nota no mueve plata, no mueve stock, no cambia el estado y la compradora no la ve nunca; quien atiende cuando la compradora llama es justamente el vendedor, y esa nota es la que evita el segundo viaje de la moto.
 
 **Cómo se implementa** (la tabla de arriba es la especificación, no la defensa):
 
@@ -257,8 +263,26 @@ MySQL 8, InnoDB, `utf8mb4`. All money columns `BIGINT UNSIGNED` (integer guaran�
 └────────────────────────────┘           ┌────────────────────────────┐
                                          │       shipping_zones       │
                                          │ id, name, cities JSON,     │
-                                         │ price_pyg BIGINT           │
+                                         │ price_pyg BIGINT,          │
+                                         │ free_threshold_pyg NULL    │
+                                         └─────────────┬──────────────┘
+                                                       │ referenciada por id
+                                                       │ (zone_ids JSON)
+                                         ┌─────────────┴──────────────┐
+                                         │      shipping_methods      │
+                                         │ id, slug UQ, name          │
+                                         │ kind: courier|local|retiro │
+                                         │ pricing: zona|fijo         │
+                                         │ fixed_price_pyg NULL       │
+                                         │ zone_ids JSON ([] = todas) │
+                                         │ allowed_payment_methods    │
+                                         │      JSON (nunca vacío)    │
+                                         │ description, is_active,    │
+                                         │ position                   │
                                          └────────────────────────────┘
+                                   orders.shipping_method_id → este id
+                                   (nullable, ON DELETE SET NULL), y
+                                   orders.shipping_method_name (snapshot)
 ```
 
 ### Cupones y descuentos (FASE 2, PR G)
@@ -307,6 +331,58 @@ Controles cruzados nuevos: `descuento_sin_cupon` (y su inverso),
 - `line_total_pyg = unit_price_pyg * qty`, `total_pyg = subtotal_pyg + shipping_pyg` — asserted in the same server function that writes them, and by a nightly reconciliation query.
 - Prices are **IVA incluido** (PY consumer convention). Included IVA per line = `round(line_total * rate / (100 + rate))`, summed into `iva_10_pyg` / `iva_5_pyg`. Never added on top of the displayed price.
 
+#### Devoluciones: el ledger, no un estado (O7)
+
+Hasta O7 una devolución era `payments.status = 'refunded'` y nada más: no
+quedaba ni el monto ni quién la autorizó, y **un comercio que devuelve una
+remera de un pedido de tres no tenía dónde escribirlo**. Ahora cada devolución
+—total o parcial— es una fila en `refunds`, append-only como el resto de la
+auditoría, y `payments.refunded_pyg` es el acumulado.
+
+El acumulado es una denormalización deliberada: la decisión "¿puedo devolver
+₲50.000 más?" se toma con la fila bloqueada en una sola transacción, y un
+`SUM()` sobre el ledger adentro de ese lock es exactamente la carrera que el
+lock existe para evitar. El precio es que se puede separar del ledger, y por
+eso `pnpm reconcile` verifica tres igualdades en cada corrida:
+
+| Invariante | Qué se rompe si falla |
+|---|---|
+| `payments.refunded_pyg = Σ refunds.amount_pyg` | El próximo reembolso se calcula contra un número que no es la verdad. |
+| `refunded_pyg ≤ amount_pyg` | Se devolvió más de lo que entró. |
+| `status = 'refunded' ⇔ refunded_pyg = amount_pyg` | Un pago marcado devuelto al que le falta plata en el ledger, o uno con todo devuelto que sigue figurando como cobrado — y por lo tanto aparece en los controles de "plata que entró". |
+
+**Un parcial no mueve el estado del pedido.** Es su caso de uso: la compradora
+se queda con dos de las tres remeras y ese pedido sigue su curso. Deja igual su
+rastro en la historia del pedido, con `from = to` y el prefijo
+`devolución parcial ₲`, y el control de aristas imposibles reconoce ese prefijo
+en vez de reportarlo (la constante la comparten `payment-recovery.ts` y
+`reconciliation.ts`, justamente para que no se puedan separar). Sólo el
+movimiento que **completa** el total marca `payments.status = 'refunded'`.
+Con `refundPayment({ allowSettled: true, ... })`, desde la ficha y sólo para
+owner, lleva un pedido `pagado`, `preparando`, `enviado` o `entregado` a
+`reembolsado`, con el motivo `pago devuelto: <reason>`. El ledger, el pago y
+la transición se escriben en una sola transacción. `allowSettled` es `false`
+por defecto: la lista de pagos colgados sigue rechazando el total si el
+pedido revivió. Para pedidos fuera de la cadena del cobro, el total sigue
+llevando a `cancelado`. **Sólo se entra a `reembolsado` por `refundPayment`**:
+`advanceOrder` lo rechaza y los botones de cambio de estado no lo ofrecen.
+El stock no vuelve solo; la mercadería devuelta se repone con un ajuste de
+stock manual, auditado.
+
+#### `price_adjustments`: por qué los precios también tienen auditoría (O7)
+
+`variants.price_pyg` es una sola cifra que se pisa. Sin una fila por cambio, la
+pregunta "¿por qué esta variante vale ₲180.000 si la semana pasada valía
+₲150.000?" no tiene respuesta.
+
+Importa sobre todo por la acción masiva: subir un 20 % a doscientas variantes
+de un click es la operación más fácil de arrepentirse del panel. El cálculo es
+entero y con el redondeo explícito (`precio × (100 + %) / 100`, multiplicando
+antes de dividir, redondeado a ₲100 o ₲1.000), **nunca da ₲0** —el piso es el
+propio redondeo— y `compare_at_pyg` no se toca: si el precio tachado subiera
+con el resto, el descuento que muestra la vidriera sería siempre el mismo y no
+significaría nada.
+
 ### Columnas de la compra que no son plata
 
 `orders` guarda además tres cosas que no entran en la cuenta pero se deciden
@@ -316,6 +392,27 @@ en el mismo formulario:
 |---|---|
 | `marketing_opt_in` **nullable** | Tres estados, no dos: `NULL` = no se preguntó, `false` = dijo que no, `true` = aceptó. Un `NOT NULL DEFAULT false` mezcla el primero con el segundo, y el consentimiento es lo único que no se puede completar retroactivamente. `marketing_opt_in_at` guarda cuándo contestó. **El MVP no manda nada**: no hay proveedor de mensajería en el stack. |
 | `is_gift` **NOT NULL** | Acá `false` y "no contestó" sí son lo mismo: un pedido que nadie marcó no es un regalo. `gift_note` sólo se escribe si `is_gift`, para que destildar la casilla no deje un mensaje viejo colgado. |
+| `tracking_carrier` / `tracking_code` / `tracking_url` **nullables** (O5) | El seguimiento del envío. Se escriben **adentro de la transacción de `transitionOrder`** y sólo con destino `enviado`; cualquier otro destino con tracking tira `TrackingNotAllowedError`. Partirlo en un `UPDATE` aparte crearía el estado imposible de un pedido despachado sin guía —o con la guía del envío anterior— cuando la segunda escritura falla. Los tres pueden faltar por separado: una moto propia no tiene número de guía y un courier chico no da link. La cadena vacía entra como `NULL`, para que ningún lector tenga que acordarse de tratarla como ausente. |
+
+#### `order_notes` — lo que el mostrador anota (O5)
+
+Tabla propia, append-only, **nunca visible para la compradora**: "llamó, pasa a
+retirar el jueves", "el timbre no anda". Hoy eso vive en el grupo de WhatsApp
+del local y se pierde.
+
+Tabla y no un `order_events` con `from = to`, porque **una nota no es una
+transición**: meterla ahí obligaría a que todo lo que lee la historia de
+estados —`pnpm reconcile`, la máquina de estados de §3, el timeline del
+comprador— aprendiera a ignorar filas que no son cambios de estado, y bastaría
+con que uno se olvidara para que una nota apareciera como un movimiento del
+pedido. Donde sí se mezclan es en `/admin/actividad`, que las suma como tercer
+origen del `UNION ALL` (`nota`) con el mismo desempate por `id`.
+
+Cuerpo 1..1000 trimmed, `actor` + `actor_user_id` como el resto de la
+auditoría, `ON DELETE CASCADE` contra el pedido. El dominio
+(`src/domain/order-notes.ts`) re-lee que el usuario siga activo aunque el
+guard ya lo haya hecho: la cookie firmada sigue siendo válida hasta que expira,
+así que a quien le cortaron el acceso hace un minuto todavía le anda la sesión.
 
 ### Qué se ve en la vidriera (FASE 2, PR J)
 
@@ -338,6 +435,40 @@ Consecuencia para el dueño, y la pantalla se la dice con el número exacto ante
 de confirmar: **apagar una categoría apaga todos sus productos.** No borra
 nada — los productos quedan como estaban y vuelven solos al reactivarla.
 
+### Destacados, categorías con foto y "avisame cuando haya stock" (O6, O7)
+
+Tres piezas chicas de schema, agregadas por O5/O6/O7, que no tienen entidad
+propia en el diagrama de arriba porque son columnas sueltas o tablas sin
+relaciones nuevas:
+
+- **`products.is_featured`** (bool, default `false`, índice
+  `(is_featured, published_at)`): lo elige el dueño a mano desde el panel.
+  `getFeaturedProducts(limit)` los devuelve; si no hay ninguno, cae al mismo
+  criterio que la home de siempre (`getCatalog({ limit })`, orden por
+  posición de categoría y nombre) — **no** "los más nuevos" a secas, para que
+  una tienda que recién trae la migración no vea moverse su portada.
+- **`categories.description` / `image_cloudinary_id` / `image_alt`**: texto y
+  foto opcionales de la página de categoría (`f_auto,q_auto`, folder
+  `categorias/` bajo el prefijo de Cloudinary de la tienda). Sin ninguno de
+  los tres, la página es bit a bit la de antes.
+- **`variants.reorder_point`** (`int unsigned` NULL): umbral de "stock bajo"
+  por variante; `NULL` usa el default global (3). `lowStockVariants` lo
+  respeta con `COALESCE` en el SQL — y con `CAST(... AS SIGNED)` en la
+  comparación, porque `on_hand - reorder_point` en aritmética sin signo tira
+  `ER_DATA_OUT_OF_RANGE` en MySQL 8 apenas el resultado sería negativo (que es
+  justo el caso que la consulta busca; MariaDB no lo reproduce — ver
+  `KNOWN-ISSUES.md`).
+- **`stock_alerts`** (`id`, `variant_id` FK cascade, `phone`, `created_at`,
+  `notified_at` NULL; `UNIQUE(variant_id, phone)`): "avisame cuando haya
+  stock" de la vidriera. `subscribe()` rechaza si la variante **ya** tiene
+  disponibilidad (no es un embudo de marketing, es un aviso puntual);
+  `notifyBackInStock()` marca `notified_at` **antes** de mandar el WhatsApp
+  (mismo patrón que `login-tokens`), así un envío que falla no se reintenta
+  ni duplica. Se dispara post-commit cuando `on_hand` cruza de 0 a > 0
+  (`adjustStock`, importación de catálogo) y además lo barre el cron del
+  resumen diario, para el caso de una reserva vencida que liberó stock sin
+  ningún ajuste manual detrás. Purga a los 90 días desde `runMaintenance`.
+
 ### Zonas de envío: quién las escribe (FASE 2, PR K)
 
 `shipping_zones` la edita el `owner` desde `/admin/envios`, y el dominio
@@ -358,6 +489,67 @@ sin enterarse:
 
 Editar una zona **no toca los pedidos en vuelo**: el flete quedó copiado en
 `orders.shipping_pyg` cuando se creó cada pedido.
+
+### Métodos de envío: cómo se entrega decide con qué se paga (FASE 3)
+
+`shipping_zones` contesta *cuánto sale llegar a esa ciudad*. Le faltaba la otra
+mitad: **de qué formas se entrega**. Hasta acá el medio de pago era un enum
+suelto del pedido, sin relación con la entrega, así que "contra entrega" quedaba
+ofrecido en todo el país — incluido el interior, donde nadie del comercio va a
+estar en la puerta para cobrar. Y un comercio que tiene courier nacional *y*
+moto propia *y* retiro en el local no podía modelar ninguna de las tres.
+
+`shipping_methods` es una fila por forma de entregar:
+
+| Columna | Qué decide |
+|---|---|
+| `kind` (`courier` \| `local` \| `retiro`) | La regla del dominio. `retiro` no viaja: ignora zonas y cuesta ₲0 siempre. |
+| `pricing` (`zona` \| `fijo`) + `fixed_price_pyg` | De dónde sale el precio. `zona` reusa `shipping_zones` **con su umbral de envío gratis**; `fijo` cobra su tarifa plana, sin umbral (una tarifa de barrio no depende del monto de la compra). |
+| `zone_ids` JSON | A qué zonas aplica. **Vacío = todas las zonas activas**, que es el default. |
+| `allowed_payment_methods` JSON | El subconjunto de `PAYMENT_METHODS` que habilita. **Nunca vacío.** |
+
+**La tabla vacía no es un caso borde: es el estado de toda tienda ya clonada.**
+Sin filas, `quoteShippingMethods` devuelve un único método implícito
+(`id: null`, "Envío a domicilio") con el precio de la zona y los tres medios de
+pago — o sea el checkout exacto de antes. Nadie tiene que configurar nada para
+seguir vendiendo igual, y el checkout ni siquiera dibuja la pregunta nueva
+mientras la única opción sea la implícita.
+
+Tres reglas que valen la pena:
+
+- **Una ciudad cotizada "por descarte" no habilita la moto del barrio.** Un
+  método con `zone_ids` declarados aplica sólo si la ciudad cayó en una de esas
+  zonas **de forma exacta**. Cuando la ciudad no está en ninguna lista se cobra
+  la tarifa más cara (`ShippingQuote.match = "mas_cara"`), y eso no la convierte
+  en una ciudad donde el comercio reparte: ofrecerle contra entrega ahí es
+  prometer una visita que nadie va a hacer.
+- **El precio del envío no depende de cómo se paga.** Si el navegador no eligió
+  método, `selectShippingMethod` toma **el primero por `position`**, no "el que
+  acepte el medio de pago que mandó". Si ese primero no acepta ese pago, el
+  pedido no se crea y se dice por qué — mucho mejor que cobrar un flete distinto
+  en silencio.
+- **Quedarse sin métodos activos es legítimo**, al revés que con las zonas. Sin
+  ninguno se vuelve al implícito, que cobra la zona: no se regala nada. Por eso
+  no hay regla de "el último activo".
+
+`createOrder` re-valida el método **adentro de su transacción** (activo, aplica
+a la ciudad, acepta el `payment_method` elegido) y re-cotiza el precio del lado
+del servidor. Lo que viaja del navegador es un **id**, nunca un monto; lo que se
+cobra sale de `computeOrderTotals`, la misma función que corrió la cotización
+(§1 regla 1). Un método inválido es un error del dominio
+(`ShippingMethodRejectedError`, `PaymentMethodNotAllowedError`), no un 500.
+
+El pedido guarda `shipping_method_id` (nullable, `ON DELETE SET NULL`) **y**
+`shipping_method_name` como snapshot, con el mismo criterio que `coupon_code`:
+si el dueño renombra o borra "Moto Asunción", ese pedido tiene que seguir
+diciendo cómo se entregó. El precio sigue viviendo donde siempre,
+`orders.shipping_pyg`, y editar un método **no toca los pedidos en vuelo**.
+
+Se configura desde `/admin/envios` (owner-only, misma pantalla que las zonas) y
+sale en el aviso de pedido nuevo al comercio y en la ficha de `/admin/pedidos`.
+`pnpm preflight` avisa —sin bloquear, y es el único de sus controles que lee la
+base— si hay métodos activos cuyas zonas están todas apagadas: están prendidos,
+se ven prendidos, y no le aparecen a nadie.
 
 ### Datos bancarios: dos fuentes con precedencia (FASE 2, PR T)
 
@@ -405,9 +597,10 @@ y aparece cuando no hay datos en ninguna de las dos fuentes.
 
 ### La cotización de envío no cobra
 
-`computeOrderTotals(items, ciudad, { executor })` es **la** cuenta del pedido:
-subtotal re-preciado, flete por zona, IVA incluido del flete, total. La usan
-dos caminos y a propósito no hay un tercero:
+`computeOrderTotals(items, ciudad, { executor, shippingMethodId })` es **la**
+cuenta del pedido: subtotal re-preciado, flete del método de envío elegido —que
+por default sale de la zona—, IVA incluido del flete, total. La usan dos caminos
+y a propósito no hay un tercero:
 
 1. `quoteCartShipping` — server action pública, sólo lectura. No crea pedido,
    no reserva stock, no toca `on_hand`. Es lo que ve la compradora antes de
@@ -443,7 +636,7 @@ compradora ponga su ciudad puede no existir ninguna respuesta verdadera, y
 disponible(variant) = on_hand − SUM(reservations.qty WHERE state='held' AND expires_at > NOW())
 ```
 
-A **hold** is placed when the order is created (45 min for Pagopar, 24 h for bank transfer / COD). It expires on its own — availability is computed live, so a failed cron job can never strand inventory. A nightly job only garbage-collects old rows.
+A **hold** is placed when the order is created (45 min for Pagopar, 24 h for bank transfer, 7 days for COD). COD money arrives at the door, days after the order; a 24 h hold expired orders whose packages were already prepared. The hold still expires after 7 days so forgotten orders cannot block stock forever. Availability is computed live, so a failed cron job can never strand inventory. A nightly job only garbage-collects old rows.
 
 Overselling is prevented at the write: the reservation insert runs inside a transaction that does `SELECT … FOR UPDATE` on the variant row and re-checks availability before committing.
 
@@ -479,22 +672,78 @@ exactamente qué pasó.
       │      ▼   │                  │
       │  esperando_verificacion ────┘        ← comprobante subido (SPI/QR)
       │      │
-      │      └──► rechazado ──► pendiente_pago      (comprobante inválido, reintento)
+      │      └──► rechazado ──► esperando_verificacion (nuevo comprobante)
+      │               ├──► pagado                 (cobrado desde el panel)
+      │               ├──► vencido                (cron, reserved_until pasado)
+      │               └──► cancelado              (manual)
       ▼
    vencido   ◄── pasó reserved_until sin pago
       │
       └──► cancelado                          (manual, en cualquier estado pre-pago)
-                              pagado ──► reembolsado   (sólo manual)
+       pagado | preparando | enviado | entregado ──► reembolsado
+                                    (sólo refundPayment, pasando por el ledger)
 ```
+
+Un pedido `rechazado` conserva su reserva para volver a subir un comprobante
+(`→ esperando_verificacion`) o darlo por cobrado desde el panel (`→ pagado`).
+También vence por cron al pasar `reserved_until` (`→ vencido`, igual que
+`pendiente_pago`) o se cancela manualmente (`→ cancelado`); ambos liberan la
+reserva. No vuelve a `pendiente_pago`.
+
+Las cuatro aristas a `reembolsado` sólo se recorren desde `refundPayment`,
+al completar el total en el ledger (sección 2). No son cambios de estado
+directos del panel. Para un pedido ya despachado, la devolución no repone
+stock: la mercadería que vuelve requiere un ajuste manual, auditado.
 
 Every transition goes through **one** function, `transitionOrder(orderId, to, actor, reason)`, which:
 1. opens a transaction and `SELECT … FOR UPDATE` on the order,
 2. rejects any edge not in the allow-list (so a duplicate or late webhook can never drag `enviado` back to `pagado`),
 3. on `→ pagado`: marks reservations `consumed` and decrements `variants.on_hand` in the same transaction,
 4. on `→ vencido | cancelado`: marks reservations `released`,
-5. writes an `order_events` row.
+5. on `→ enviado`: escribe el seguimiento del envío (`tracking_carrier`,
+   `tracking_code`, `tracking_url`) en el **mismo** `UPDATE` que el estado,
+6. writes an `order_events` row.
 
 No UI or route ever runs a raw `UPDATE orders SET status = …`.
+
+**La arista a `enviado` es la única que acepta `options.tracking`** (O5).
+Cualquier otro destino con tracking puesto tira `TrackingNotAllowedError` antes
+de abrir la transacción: cargar una guía al cancelar un pedido no es una
+operación con sentido, y aceptarla en silencio deja el dato escrito donde nadie
+lo va a mirar hasta que aparezca en el lugar equivocado. El aviso ENVIADO a la
+compradora (`order-customer-notifications.ts`) lee esas tres columnas de la
+fila ya commiteada y suma courier, guía y link cuando existen; sin ninguno de
+los tres, el texto es exactamente el de antes de O5.
+
+**Editar un pedido no es una transición** (O16). `editPendingOrder`
+(`src/domain/edit-order.ts`) cambia cantidades, dirección, envío y totales de
+un pedido que sigue en `pendiente_pago`: el estado no se mueve, así que **no**
+pasa por `transitionOrder` y `orders.status` conserva su único escritor. Lo que
+deja es una fila en `order_events` con `from = to` y el prefijo constante
+`EDIT_ORDER_REASON_PREFIX`, el mismo mecanismo del reembolso parcial — y, como
+aquél, `reconcile` lo reconoce por ese prefijo para no reportarlo como arista
+imposible. Los totales que escribe los sigue verificando `findTotalMismatches`
+con la identidad de siempre: `total = subtotal − descuento + envío`.
+
+Sólo se edita lo que todavía no se cobró: `pendiente_pago`, sin un pago `paid`,
+y **nunca con tarjeta** — ahí el monto ya está comprometido en Pagopar y la
+verificación de monto del webhook (§4) es la red que atrapa un cobro que no
+coincide; editar el total a mano sería romperla. Las cantidades sólo bajan o se
+quitan (subir es un pedido nuevo), el `unit_price_pyg` que la compradora vio no
+se toca, `reserved_until` no se extiende, y las reservas de stock bajan con las
+líneas para que lo que ya no se vende vuelva a estar disponible.
+
+**El cupón se re-valida contra el subtotal nuevo, pero sólo por el mínimo de
+compra.** Si con las cantidades nuevas el pedido ya no llega al mínimo, el
+cupón se quita, el descuento vuelve a 0 y la pantalla lo dice (`couponRemoved`)
+— nunca en silencio. Lo que **no** se re-chequea es vigencia ni usos: ese
+control responde "¿se le puede dar este cupón a alguien ahora?", y acá la
+pregunta es otra; empezando por el uso que este mismo pedido ya consumió, le
+subiría el total a una compradora que sólo pidió mandar una remera menos. Cuando
+el cupón se quita por mínimo de compra, **se devuelve el uso**: se bloquea la
+fila del cupón y se decrementa `times_used` sin bajar de cero, en la misma
+transacción. Si la fila ya no existe, no hay nada que decrementar. Así coincide
+con reconcile, que cuenta los pedidos que siguen apuntando al cupón.
 
 ---
 
@@ -623,7 +872,7 @@ refund, and pretending the order is alive would be worse than saying nothing.
 4. One-tap WhatsApp button: `https://wa.me/595XXXXXXXXX?text=` + `encodeURIComponent(message)`. Message contains order number, total, and the tokenized order URL. Keep under ~1500 chars — long deeplinks truncate on iOS.
 5. Owner checks the receipt against the bank statement in `/admin`, clicks **Aprobar** → `transitionOrder(→ pagado)`, which also writes the `payments` row (below).
 
-**Contra entrega (COD)** uses the same states, minus the receipt: the owner confirms on delivery. Worth having on day one — cash on delivery is still a large share of PY e-commerce.
+**Contra entrega (COD)** starts in `pendiente_pago`, minus the receipt: the owner confirms on delivery. Its reservation lasts **7 days**, because money arrives at the door days after ordering; 24 h expired orders with packages already prepared. Forgotten orders still expire after 7 days to release stock. COD receives no payment reminder because nothing is due before delivery.
 
 ### 5.2 The owner hears about the order from the server, not from the buyer
 
@@ -639,10 +888,85 @@ checkout**: it is fired after the order is committed, without `await`, with its
 own timeout, and `notifyOwnerNewOrder` never throws — the buyer's order can
 never be lost because Meta is down. **Missing variables switch it off**, like
 every other integration here. And **it always leaves a trail**: sent or failed,
-a row lands in `order_events` (`actor: "sistema"`, `from_status NULL`, reason
+a row lands in `order_events` (`actor: "sistema"`, `from_status = to_status`, reason
 `aviso_dueno_enviado` / `aviso_dueno_fallido: …`), because a notification that
 disappears silently is worse than none — the owner would read "no messages" as
 "no orders".
+
+#### 5.2.1 The buyer hears back too (`order-customer-notifications.ts`)
+
+O2 only told the merchant. The buyer never got anything from the server —
+only the `wa.me` links she could choose to tap. `notifyCustomerOrderEvent`
+closes that gap with three notices, one per moment she actually cares about:
+**confirmado** (right after the order is written — same moment `createOrder`
+commits, so it fires from `createOrder` itself, not from `submitCheckout`),
+**pagado** (entering `pagado`, whichever of the three ways money arrives:
+approved transfer, Pagopar, or COD), and **enviado** (entering `enviado`).
+Same rules as the owner's aviso — never blocks or delays the write that
+triggers it, missing template switches that one notice off, every attempt
+leaves an `order_events` row (`aviso_cliente_<kind>` / `aviso_cliente_<kind>_fallido: …`)
+— plus one more: **each of the three templates is required even for the dev
+console sender.** The owner's aviso is foundational (any channel is fine, so
+dev can see it print with nothing but `WHATSAPP_NUMBER` configured); these
+three are independent per-store decisions ("do I want a WhatsApp when I
+confirm? when I get paid?"), so a store that configured none of them has to
+behave exactly like a store that predates this feature, in dev too — nothing
+printed to the console, nothing written to `order_events`.
+
+**Where the hook lives.** `pagado` and `enviado` are entered through
+`transitionOrder()` from several unrelated callers (the admin panel, receipt
+approval, Pagopar's webhook, the late-payment recovery flow) — hooking each
+caller individually is exactly the kind of thing a fifth caller forgets, so
+the notice fires once, centrally, right after `transitionOrder`'s own write
+resolves. When `transitionOrder` runs nested inside a caller's own
+transaction (`options.executor`), that moment is a hair before the caller's
+transaction actually commits; `notifyCustomerOrderEvent` never touches that
+transaction's connection (it opens its own). Its ordinary `SELECT` on `orders`
+does not block on the row lock and can read the previous snapshot, so the
+target status is passed as a parameter for the notice's `order_events` row.
+Notices use `from_status = to_status` and the shared `aviso_` reason prefix;
+reconciliation also recognizes historical notices with `from_status NULL`. `confirmado` has
+no transition to hook (the order is born in `pendiente_pago`), so it fires
+from `createOrder()` once its own transaction has actually returned —
+after the real commit, no caveat needed.
+
+**Idempotency.** A given order can only ever enter `pagado` once and
+`enviado` once — the state machine (§3) has no edge back into either — so in
+practice each notice fires at most once per order already. `notifyCustomerOrderEvent`
+still checks for an existing `aviso_cliente_<kind>` success row before
+sending, as a second, cheap guard against firing the same hook twice.
+
+#### 5.2.2 Los dos avisos programados de O6
+
+Además de los que cuelgan de un evento del pedido, hay dos que los dispara el
+reloj o el inventario. Comparten todas las reglas de arriba (post-commit, con
+timeout, la plantilla es el interruptor, nunca hacen fallar lo que los
+disparó) y agregan una propia: **son idempotentes contra un cron que puede
+correr dos veces**.
+
+| Aviso | Quién lo dispara | Qué lo hace idempotente |
+|---|---|---|
+| **Resumen diario** al dueño (`daily-digest.ts`) | `/api/cron/resumen-diario` | `claimJob('resumen_diario', { onceEvery: 'dia' })`: una corrida exitosa por día calendario de **Asunción**, decidida con `SELECT … FOR UPDATE`. Se mira `last_ok_at` y no `finished_at`, para que un intento fallido a las 8:00 pueda reintentarse a las 8:15. |
+| **"Volvió a haber stock"** a la compradora (`stock-alerts.ts`) | `adjustStock` post-commit cuando la disponibilidad cruza de 0 a >0, la importación con `pisarStock`, y el barrido del cron | `notified_at` se marca **antes** de mandar (`UPDATE … WHERE notified_at IS NULL` + lectura de confirmación, el patrón de `login-tokens.ts`). Un envío que falla deja la fila marcada igual: se pierde un aviso, y eso es preferible a un reintento que le manda diez mensajes a la misma persona. |
+| **Recordatorio de pago** a la compradora (`payment-reminders.ts`, O15) | `runMaintenance`, el cron de `vencer-pedidos` que ya corría cada 15 min — **después** de vencer, así un pedido recién vencido nunca recibe "podés pagar hasta las…" | `orders.payment_reminder_sent_at` se marca **antes** de mandar (`UPDATE … WHERE payment_reminder_sent_at IS NULL`, y sólo con `affectedRows = 1` sale el mensaje). Un envío que falla queda marcado igual, por el mismo motivo: un recordatorio de menos es tolerable, dos son spam. |
+
+El recordatorio sale **una sola vez por pedido**, cuando a un `pendiente_pago`
+le quedan menos de 6 h de `reserved_until`, y lleva número, total, hora límite
+en Asunción y el link tokenizado a su pedido — ningún dato bancario: ésos ya
+están en esa página, y el mensaje no es el lugar para repetirlos. Contra
+entrega sí pasa por `pendiente_pago`, pero se excluye explícitamente porque no
+tiene nada que pagar antes de recibir: el aviso es para transferencia y tarjeta abandonada en Pagopar. Sin
+`WHATSAPP_CLOUD_TEMPLATE_CLIENTE_RECORDATORIO` la feature está apagada y no
+consulta ni una fila.
+
+El barrido del cron existe por un caso que el disparo post-ajuste no puede
+cubrir: la disponibilidad que libera una **reserva vencida** no tiene ninguna
+escritura detrás de la cual colgarse.
+
+`job_runs` es la tabla que sostiene las dos formas de "no ahora" (una por día,
+y el lock con expiración que usa el backup de O8). El lock **vence**: un
+proceso que muere no llama a `finishJob`, y un lock eterno deja el trabajo
+apagado sin que nadie se entere.
 
 ### 5.1 A manual payment is still a payment
 
@@ -698,7 +1022,28 @@ suite and never on the merchant's server.
 - Do **not** store uploads on the Hostinger filesystem — a git-based redeploy can wipe them.
 - Blur placeholders stored in `product_images.blur_data_url`; `next/image` with `unoptimized` (Cloudinary already does the work) and long cache headers.
 - Catalog pages use ISR (`revalidate`); only live availability is fetched client-side.
-- Budget: LCP < 2.5 s on Slow-4G, client JS < 120 KB gz on the product page.
+- Budget: LCP < 2.5 s on Slow-4G.
+- **Client JS, measured (S12, 2026-09-06 — Next 16.3.4/Turbopack, `next build && next start`, real gz bytes of same-origin `<script>` responses, no fallback):**
+
+  | Página | Medido | Techo que bloquea CI (`tests/e2e/presupuesto.spec.ts`) |
+  |---|---|---|
+  | `/` | 219.9 KB gz | **245 KB** |
+  | `/producto/<slug>` | 229.6 KB gz | **260 KB** |
+  | `/checkout` | 224.2 KB gz | **255 KB** |
+
+  Muy por encima de la cifra de 120 KB que este documento tenía antes de
+  medir — esa cifra **no** era una medición, era una aspiración, y quedó
+  obsoleta en cuanto alguien puso un runner real a contarla. El techo de
+  arriba es medido + 10 %: una alarma contra que el bundle **crezca más**, no
+  un objetivo de performance. El culpable principal (documentado en
+  `KNOWN-ISSUES.md`): varios componentes cliente del panel importan un
+  *valor* (no sólo un tipo) desde `@/db/schema` — como `schema.ts` define
+  cada tabla con `mysqlTable(...)` a nivel de módulo (una llamada con
+  efecto), ningún bundler puede tree-shakear el resto del archivo ni su
+  `import` de `drizzle-orm`, así que esas pantallas cargan el ORM entero
+  (~17 KB gz) para leer un array de strings. El arreglo (mover los arrays de
+  enum a un archivo sin `drizzle-orm`) está fuera de los límites de las
+  fases Sonnet — queda para una fase con permiso sobre `src/db/**`.
 - MySQL pool `connectionLimit: 8` — Hostinger caps concurrent connections per user; a bigger pool causes random `ER_CON_COUNT_ERROR` under load.
 
 ---

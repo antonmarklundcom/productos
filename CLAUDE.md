@@ -22,6 +22,9 @@ leé:
 Regla práctica: si el archivo toca plata, stock o estados de pedido, no se
 toca por tienda. Si sólo dibuja, es libre. Ver NEW-STORE.md §5 para el
 detalle completo y las excepciones (`checkout-form.tsx`, `src/app/admin`).
+Al rediseñar piel, no le saques el `data-testid` a un elemento que ya lo
+tiene — es el contrato que usan los specs de `tests/e2e/**`, ver
+NEW-STORE.md §5 y `src/lib/testids.ts`.
 
 ## Antes de cualquier cambio
 
@@ -41,4 +44,8 @@ detalle completo y las excepciones (`checkout-form.tsx`, `src/app/admin`).
 
 Corré `pnpm template:diff` de vez en cuando para ver qué arreglos de
 `antonmarklundcom/ecom` le faltan a esta tienda (requiere el remoto
-`template`, ver NEW-STORE.md). No cherry-pickees piel que ya rediseñaste.
+`template`, ver NEW-STORE.md). Para traerlos, `pnpm template:sync` —en una
+rama, nunca en `main`— automatiza el cherry-pick de la maquinaria y los
+conflictos de siempre (`fable/`, el lockfile, los workflows de CI); para en
+seco ante cualquier otro conflicto. Ver NEW-STORE.md § "Arreglos que aparecen
+después". No cherry-pickees piel que ya rediseñaste.

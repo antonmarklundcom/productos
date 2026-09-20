@@ -25,22 +25,54 @@ import {
 // ENUMs (TASKS.md §3)
 // ---------------------------------------------------------------------------
 
-export const ORDER_STATUSES = [
-  'pendiente_pago',
-  'esperando_verificacion',
-  'pagado',
-  'preparando',
-  'enviado',
-  'entregado',
-  'rechazado',
-  'vencido',
-  'cancelado',
-  'reembolsado',
-] as const;
-export type OrderStatus = (typeof ORDER_STATUSES)[number];
+/**
+ * Los valores de enum que el navegador también necesita viven en
+ * `src/db/enums.ts`, sin `drizzle-orm` adentro (el motivo está escrito ahí).
+ * Se re-exportan para que el lado del servidor los siga leyendo del schema.
+ */
+export {
+  COUPON_TYPES,
+  DOC_TYPES,
+  ORDER_STATUSES,
+  PAYMENT_METHODS,
+  type CouponType,
+  type DocType,
+  type OrderStatus,
+  type PaymentMethod,
+} from './enums';
+// El `export ... from` re-exporta pero no trae los bindings a este módulo, y
+// las columnas `mysqlEnum(...)` de abajo los necesitan como valores.
+import {
+  COUPON_TYPES,
+  DOC_TYPES,
+  ORDER_STATUSES,
+  PAYMENT_METHODS,
+  type PaymentMethod,
+} from './enums';
 
-export const PAYMENT_METHODS = ['transferencia', 'contra_entrega', 'tarjeta'] as const;
-export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+/**
+ * Cómo llega el pedido a destino (PLAN.md FASE 3, métodos de envío).
+ *
+ * No es cosmética: cada valor tiene una regla distinta en el dominio. Un
+ * `courier` nacional cobra por zona y no está en la puerta para cobrar en
+ * efectivo; una moto `local` sí lo está, y es la única forma honesta de
+ * ofrecer contra entrega en las ciudades donde el comercio realmente reparte;
+ * `retiro` no viaja a ningún lado, así que ignora las zonas y cuesta ₲0
+ * siempre.
+ */
+export const SHIPPING_METHOD_KINDS = ['courier', 'local', 'retiro'] as const;
+export type ShippingMethodKind = (typeof SHIPPING_METHOD_KINDS)[number];
+
+/**
+ * De dónde sale el precio del envío de un método.
+ *
+ * `zona` reusa `shipping_zones` tal cual —incluido su umbral de envío
+ * gratis—, que es lo que ya venía funcionando. `fijo` cobra
+ * `fixed_price_pyg` cualquiera sea la ciudad: es la tarifa plana que cobra
+ * una moto del barrio, y no tiene umbral porque no depende de la distancia.
+ */
+export const SHIPPING_METHOD_PRICINGS = ['zona', 'fijo'] as const;
+export type ShippingMethodPricing = (typeof SHIPPING_METHOD_PRICINGS)[number];
 
 export const PAYMENT_PROVIDERS = ['spi', 'cod', 'pagopar'] as const;
 export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
@@ -50,9 +82,6 @@ export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export const RECEIPT_REVIEWS = ['pending', 'approved', 'rejected'] as const;
 export type ReceiptReview = (typeof RECEIPT_REVIEWS)[number];
-
-export const DOC_TYPES = ['RUC', 'CI', 'NINGUNO'] as const;
-export type DocType = (typeof DOC_TYPES)[number];
 
 /**
  * Los roles viven en `src/lib/roles.ts`, sin dependencias, y se re-exportan
@@ -71,8 +100,7 @@ export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 export const RESERVATION_STATES = ['held', 'consumed', 'released'] as const;
 export type ReservationState = (typeof RESERVATION_STATES)[number];
 
-export const IVA_RATES = [10, 5, 0] as const;
-export type IvaRate = (typeof IVA_RATES)[number];
+export { IVA_RATES, type IvaRate } from './enums';
 
 /** Whole guaraníes. Never a float, never a decimal. */
 const pyg = (name: string) => bigint(name, { mode: 'number', unsigned: true });
@@ -92,6 +120,26 @@ export const categories = mysqlTable(
     parentId: int('parent_id'),
     position: int('position').notNull().default(0),
     isActive: boolean('is_active').notNull().default(true),
+    /**
+     * El texto que explica la categoría arriba de su grilla (plan-operacion §2).
+     *
+     * Nullable y sin default: una categoría sin descripción tiene que seguir
+     * dibujándose exactamente como antes de esta columna. `text` y no
+     * `varchar` porque es copy SEO —dos o tres párrafos— y recortarlo a 255
+     * obligaría a reescribirlo cada vez que alguien lo mejora.
+     */
+    description: text('description'),
+    /**
+     * `public_id` de la foto de portada en Cloudinary, carpeta `categorias/`.
+     * NULL = sin foto, y la página cae al encabezado de texto de siempre.
+     */
+    imageCloudinaryId: varchar('image_cloudinary_id', { length: 255 }),
+    /**
+     * El alt de esa foto. Va aparte y no derivado del nombre: "Zapatillas" no
+     * describe la imagen, y una portada sin alt es una página menos accesible
+     * y peor indexada. NULL sólo mientras no haya foto.
+     */
+    imageAlt: varchar('image_alt', { length: 200 }),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (t) => [unique('categories_slug_uq').on(t.slug), index('categories_parent_idx').on(t.parentId)],
@@ -111,6 +159,16 @@ export const products = mysqlTable(
     /** 10 | 5 | 0 — IVA incluido en el precio. */
     ivaRate: tinyint('iva_rate').notNull().default(10),
     isActive: boolean('is_active').notNull().default(true),
+    /**
+     * Destacado de la home, elegido a mano por el comercio (plan-operacion §2).
+     *
+     * NOT NULL con default `false`, al revés que el consentimiento de
+     * marketing: acá "nadie lo marcó" y "no es destacado" son lo mismo, así
+     * que un tercer estado no significaría nada. El default es lo que hace
+     * que una tienda que sincroniza esta migración no despliegue de golpe una
+     * home llena de destacados que nadie eligió.
+     */
+    isFeatured: boolean('is_featured').notNull().default(false),
     publishedAt: datetime('published_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
@@ -119,6 +177,9 @@ export const products = mysqlTable(
     unique('products_slug_uq').on(t.slug),
     index('products_category_idx').on(t.categoryId),
     index('products_active_published_idx').on(t.isActive, t.publishedAt),
+    // La home pide "destacados publicados, los más nuevos primero" en cada
+    // render: sin este índice es un full scan de `products` en la portada.
+    index('products_featured_idx').on(t.isFeatured, t.publishedAt),
     // FULLTEXT(name, description) is created by scripts/post-push.ts — the
     // drizzle-kit MySQL dialect has no fulltext index builder.
   ],
@@ -152,10 +213,58 @@ export const variants = mysqlTable(
     compareAtPyg: pyg('compare_at_pyg'),
     /** Physical count. Only changes when money confirms (see transitionOrder). */
     onHand: int('on_hand', { unsigned: true }).notNull().default(0),
+    /**
+     * A partir de cuántas unidades esta variante entra en "stock bajo"
+     * (plan-operacion §2, lo usa el resumen diario de O6).
+     *
+     * NULL y no un default numérico en la columna: NULL es "usá el umbral
+     * global de la tienda", y es lo que tiene que valer para toda variante
+     * que existía antes de esta columna. Un `DEFAULT 3` escrito en la base
+     * congelaría el umbral de hoy en cada fila y haría imposible cambiarlo
+     * después para todas juntas.
+     */
+    reorderPoint: int('reorder_point', { unsigned: true }),
     isActive: boolean('is_active').notNull().default(true),
     position: int('position').notNull().default(0),
   },
   (t) => [unique('variants_sku_uq').on(t.sku), index('variants_product_idx').on(t.productId)],
+);
+
+/**
+ * "Avisame cuando haya stock" (plan-operacion §2, la manda O6).
+ *
+ * Una suscripción es un teléfono esperando una variante concreta, y nada
+ * más: no hay cuenta, no hay carrito reservado y no promete ninguna unidad.
+ * Cuando la disponibilidad de esa variante pasa de 0 a algo, sale un
+ * WhatsApp y la fila queda marcada.
+ *
+ * `UNIQUE(variant_id, phone)` es lo que hace que tocar el botón cinco veces
+ * —o dos personas desde el mismo teléfono— no se convierta en cinco
+ * mensajes: el alta es un `INSERT IGNORE` contra este índice.
+ *
+ * `notified_at` NULL es "todavía esperando" y es el filtro de la consulta que
+ * corre en cada reposición, de ahí el índice `(variant_id, notified_at)`.
+ * Marcado ≠ entregado a propósito: la fila se marca **antes** de mandar, así
+ * que un Meta caído cuesta un aviso perdido y nunca un bucle de reintentos
+ * mandándole diez mensajes a la misma persona.
+ */
+export const stockAlerts = mysqlTable(
+  'stock_alerts',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    variantId: int('variant_id')
+      .notNull()
+      .references(() => variants.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    /** `+5959XXXXXXXX`, normalizado por el mismo validador del checkout. */
+    phone: varchar('phone', { length: 20 }).notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    /** Cuándo se le avisó. NULL = sigue esperando. */
+    notifiedAt: datetime('notified_at'),
+  },
+  (t) => [
+    unique('stock_alerts_variant_phone_uq').on(t.variantId, t.phone),
+    index('stock_alerts_pending_idx').on(t.variantId, t.notifiedAt),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -183,6 +292,22 @@ export const orders = mysqlTable(
     shipReference: varchar('ship_reference', { length: 255 }),
     shipMapsUrl: varchar('ship_maps_url', { length: 500 }),
     shippingZoneId: int('shipping_zone_id'),
+    /**
+     * El método de envío elegido (FASE 3). **Nullable para siempre**, y por
+     * dos motivos distintos: los pedidos anteriores a la tabla no tienen
+     * ninguno, y una tienda que nunca configuró métodos sigue comprando por
+     * el camino implícito de siempre (ver `quoteShippingMethods`).
+     *
+     * Columna suelta con la FK en los extras, igual que `coupon_id`:
+     * `shipping_methods` se declara después en este archivo.
+     */
+    shippingMethodId: int('shipping_method_id'),
+    /**
+     * El nombre del método tal como estaba al comprar. Snapshot, igual que
+     * `coupon_code`: el dueño puede renombrar "Moto Asunción" o borrarlo, y
+     * este pedido tiene que seguir diciendo cómo se entregó.
+     */
+    shippingMethodName: varchar('shipping_method_name', { length: 160 }),
 
     subtotalPyg: pyg('subtotal_pyg').notNull().default(0),
     shippingPyg: pyg('shipping_pyg').notNull().default(0),
@@ -192,6 +317,24 @@ export const orders = mysqlTable(
 
     paymentMethod: mysqlEnum('payment_method', PAYMENT_METHODS).notNull(),
     reservedUntil: datetime('reserved_until'),
+
+    /**
+     * Cuándo se le mandó a la compradora el recordatorio de "te queda poco
+     * para pagar" (fable/plan-crecimiento.md §2). NULL = todavía no se mandó.
+     *
+     * Es la marca de idempotencia del cron, no una fecha informativa: el
+     * recordatorio se marca **antes** de mandarse, con un
+     * `UPDATE ... WHERE payment_reminder_sent_at IS NULL`, y sólo si esa
+     * escritura afectó una fila sale el mensaje. El modo de falla que evita es
+     * el spam: dos corridas del cron solapadas —o una que reintenta— le
+     * mandarían dos veces el mismo aviso a la misma persona. Un envío que
+     * falla queda marcado igual: un recordatorio de menos es tolerable, dos
+     * no.
+     *
+     * Nullable para siempre: todo pedido anterior a esta columna, y todo
+     * pedido que se paga a tiempo, muere con NULL acá.
+     */
+    paymentReminderSentAt: datetime('payment_reminder_sent_at'),
 
     /**
      * Consentimiento para novedades y promociones.
@@ -256,6 +399,22 @@ export const orders = mysqlTable(
      */
     customerId: int('customer_id'),
 
+    /**
+     * Seguimiento del envío (plan-operacion §2). Los tres se escriben
+     * **adentro de la transacción** que mueve el pedido a `enviado`
+     * (`transitionOrder`), nunca en un UPDATE aparte: si fueran dos
+     * escrituras, un pedido podría quedar despachado sin guía o con la guía
+     * del envío anterior, y la compradora recibiría un aviso que no sirve
+     * para rastrear nada.
+     *
+     * Los tres nullable para siempre: el pedido de una tienda que reparte en
+     * moto propia no tiene número de guía y no por eso está incompleto.
+     */
+    trackingCarrier: varchar('tracking_carrier', { length: 80 }),
+    trackingCode: varchar('tracking_code', { length: 120 }),
+    /** Sólo `https://`, validado en `src/lib/schemas.ts` antes de llegar acá. */
+    trackingUrl: varchar('tracking_url', { length: 500 }),
+
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
     paidAt: datetime('paid_at'),
@@ -264,6 +423,7 @@ export const orders = mysqlTable(
     unique('orders_number_uq').on(t.orderNumber),
     index('orders_customer_idx').on(t.customerId),
     index('orders_coupon_idx').on(t.couponId),
+    index('orders_shipping_method_idx').on(t.shippingMethodId),
     unique('orders_access_token_uq').on(t.accessToken),
     index('orders_status_created_idx').on(t.status, t.createdAt),
     index('orders_phone_idx').on(t.customerPhone),
@@ -308,6 +468,23 @@ export const payments = mysqlTable(
     providerRef: varchar('provider_ref', { length: 191 }).notNull(),
     amountPyg: pyg('amount_pyg').notNull(),
     status: mysqlEnum('status', PAYMENT_STATUSES).notNull().default('pending'),
+    /**
+     * Cuánto de este pago ya se devolvió, en guaraníes enteros
+     * (plan-operacion §2, lo mueve O7).
+     *
+     * Es un acumulado derivado: **siempre** igual a la suma de `refunds` de
+     * este pago y nunca mayor que `amount_pyg`. Existe igual porque la
+     * decisión "¿puedo devolver ₲50.000 más?" se toma con la fila bloqueada
+     * en una sola transacción, y un `SUM()` sobre el ledger adentro de ese
+     * lock es exactamente la carrera que el lock existe para evitar.
+     * `pnpm reconcile` verifica las dos igualdades en cada corrida: si esta
+     * columna y el ledger se separan, la contabilidad avisa.
+     *
+     * NOT NULL con default 0: un pago sin devoluciones tiene 0, no NULL. La
+     * migración backfillea los `refunded` viejos (devolución total anterior
+     * al ledger) para que esa invariante nazca verde.
+     */
+    refundedPyg: pyg('refunded_pyg').notNull().default(0),
     rawPayload: json('raw_payload'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
@@ -316,6 +493,38 @@ export const payments = mysqlTable(
     unique('payments_provider_ref_uq').on(t.provider, t.providerRef),
     index('payments_order_idx').on(t.orderId),
   ],
+);
+
+/**
+ * El ledger de devoluciones, totales y parciales (plan-operacion §2 y §5.3).
+ *
+ * Append-only, como `order_events` y `stock_adjustments`: una devolución no
+ * se edita ni se borra, se compensa con otra fila. Cada fila es plata que
+ * salió, con su monto entero, su motivo y quién la autorizó.
+ *
+ * Por qué una tabla y no sólo `payments.status = 'refunded'`: ese estado sólo
+ * podía contar la historia de la devolución total. Un comercio que devuelve
+ * una remera de un pedido de tres no tiene dónde escribirlo, y termina
+ * anotándolo en el motivo de un evento de pedido —texto libre, no sumable— o
+ * en ningún lado.
+ */
+export const refunds = mysqlTable(
+  'refunds',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    paymentId: int('payment_id')
+      .notNull()
+      .references(() => payments.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    /** Entero > 0. La suma de este pago nunca puede pasar `payments.amount_pyg`. */
+    amountPyg: pyg('amount_pyg').notNull(),
+    /** Obligatorio por diseño, igual que en `stock_adjustments`. */
+    reason: varchar('reason', { length: 500 }).notNull(),
+    actor: varchar('actor', { length: 120 }).notNull(),
+    /** La FK consultable; ver el comentario largo en `stock_adjustments`. */
+    actorUserId: int('actor_user_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('refunds_payment_idx').on(t.paymentId)],
 );
 
 /** Webhook idempotency ledger — UNIQUE(provider, event_key) is the whole point. */
@@ -417,6 +626,38 @@ export const stockAdjustments = mysqlTable(
   ],
 );
 
+/**
+ * Auditoría de cambios de precio (plan-operacion §2, la escribe O7).
+ *
+ * El hermano de `stock_adjustments`, y por el mismo motivo: `variants.
+ * price_pyg` es una sola cifra que se pisa, así que sin esta tabla la
+ * pregunta "¿por qué esta variante vale ₲180.000 si la semana pasada valía
+ * ₲150.000?" no tiene respuesta.
+ *
+ * Importa sobre todo por la acción masiva: subir un 20% a doscientas
+ * variantes de un click es la operación más fácil de arrepentirse del panel,
+ * y una fila por variante afectada es lo que permite mirar qué pasó y
+ * volverla atrás.
+ */
+export const priceAdjustments = mysqlTable(
+  'price_adjustments',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    variantId: int('variant_id')
+      .notNull()
+      .references(() => variants.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    /** El precio que había, en guaraníes enteros. */
+    fromPyg: pyg('from_pyg').notNull(),
+    /** El precio que quedó. Nunca ₲0 por redondeo: lo garantiza el dominio. */
+    toPyg: pyg('to_pyg').notNull(),
+    reason: varchar('reason', { length: 500 }).notNull(),
+    actor: varchar('actor', { length: 120 }).notNull(),
+    actorUserId: int('actor_user_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('price_adjustments_variant_idx').on(t.variantId, t.createdAt)],
+);
+
 /** Append-only audit log. Written by transitionOrder() and nothing else. */
 export const orderEvents = mysqlTable(
   'order_events',
@@ -447,12 +688,43 @@ export const orderEvents = mysqlTable(
   ],
 );
 
+/**
+ * Notas internas del pedido (plan-operacion §2 y §5.1).
+ *
+ * **Nunca las ve la compradora.** Son el renglón que hoy se escribe en un
+ * cuaderno o en el grupo de WhatsApp del local: "llamó, pasa a retirar el
+ * jueves", "el timbre no anda, avisar por teléfono".
+ *
+ * Tabla propia y no un `order_events` con `from = to`: una nota **no es una
+ * transición**. Meterla ahí obligaría a que todo lo que lee el historial de
+ * estados —`reconcile`, la máquina de estados, el timeline del comprador—
+ * aprendiera a ignorar filas que no son cambios de estado, y bastaría con
+ * que uno se olvidara para que una nota apareciera como un movimiento del
+ * pedido. En el feed de `/admin/actividad` las dos se muestran juntas, que es
+ * donde tiene sentido mezclarlas.
+ *
+ * `ON DELETE CASCADE`: la nota no significa nada sin su pedido.
+ */
+export const orderNotes = mysqlTable(
+  'order_notes',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    orderId: int('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    /** 1..1000 caracteres, trimmed. Una nota vacía no se guarda. */
+    body: varchar('body', { length: 1000 }).notNull(),
+    actor: varchar('actor', { length: 120 }).notNull(),
+    /** La FK consultable; ver el comentario largo en `stock_adjustments`. */
+    actorUserId: int('actor_user_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('order_notes_order_idx').on(t.orderId, t.createdAt)],
+);
+
 // ---------------------------------------------------------------------------
 // Cupones (PLAN.md FASE 2, PR G) — cero filas = invisible
 // ---------------------------------------------------------------------------
-
-export const COUPON_TYPES = ['porcentaje', 'monto_fijo'] as const;
-export type CouponType = (typeof COUPON_TYPES)[number];
 
 /**
  * Códigos de descuento.
@@ -676,6 +948,50 @@ export const shippingZones = mysqlTable(
 );
 
 /**
+ * Métodos de envío (FASE 3).
+ *
+ * Antes de esta tabla el envío era **una sola cosa**: la zona de la ciudad.
+ * Un comercio paraguayo típico ofrece a la vez un courier nacional, una moto
+ * propia que cobra al entregar y, a veces, retiro en el local — y "contra
+ * entrega" quedaba habilitado para ciudades donde nadie iba a ir a cobrar en
+ * la puerta. Acá cada forma de entregar es una fila, con **qué medios de pago
+ * habilita**, que es lo que faltaba para que esa promesa no se hiciera sola.
+ *
+ * Tabla vacía = la tienda de siempre: `quoteShippingMethods` devuelve un
+ * único método implícito con el precio de la zona y los tres medios de pago.
+ * Ninguna tienda ya clonada cambia de comportamiento por actualizar.
+ */
+export const shippingMethods = mysqlTable(
+  'shipping_methods',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    slug: varchar('slug', { length: 120 }).notNull(),
+    name: varchar('name', { length: 160 }).notNull(),
+    kind: mysqlEnum('kind', SHIPPING_METHOD_KINDS).notNull().default('courier'),
+    pricing: mysqlEnum('pricing', SHIPPING_METHOD_PRICINGS).notNull().default('zona'),
+    /** Sólo se usa con `pricing = 'fijo'`. NULL con `zona`, que manda la zona. */
+    fixedPricePyg: pyg('fixed_price_pyg'),
+    /**
+     * A qué zonas de `shipping_zones` aplica este método. **Lista vacía =
+     * todas las zonas activas**, que es el default y el caso más común: el
+     * courier nacional llega a todos lados. `retiro` la ignora entera.
+     */
+    zoneIds: json('zone_ids').$type<number[]>().notNull(),
+    /**
+     * Qué medios de pago habilita, subconjunto de `PAYMENT_METHODS`. **Nunca
+     * vacía**: un método que no acepta ninguna forma de pago no se puede
+     * elegir, y una fila así apagaría el checkout sin decir por qué.
+     */
+    allowedPaymentMethods: json('allowed_payment_methods').$type<PaymentMethod[]>().notNull(),
+    /** Una línea para el checkout: "Llega en 24-48 h a todo el país". */
+    description: varchar('description', { length: 200 }),
+    isActive: boolean('is_active').notNull().default(true),
+    position: int('position').notNull().default(0),
+  },
+  (t) => [unique('shipping_methods_slug_uq').on(t.slug)],
+);
+
+/**
  * Dedicated order-number counter. One row, bumped with an atomic UPDATE.
  * Never COUNT(*) — gaps are fine, collisions are not.
  */
@@ -751,3 +1067,87 @@ export const bankDetails = mysqlTable('bank_details', {
    */
   updatedBy: int('updated_by').references(() => users.id, { onDelete: 'set null' }),
 });
+
+/**
+ * Idempotencia y lock de los trabajos programados (plan-operacion §2, §0.5).
+ *
+ * Un cron no es "algo que corre una vez por día": es una URL que Hostinger
+ * puede reintentar, que un humano dispara a mano para probar, y que dos
+ * entradas del hPanel pueden estar llamando sin que nadie se acuerde. Sin
+ * esta tabla, el resumen diario le llega tres veces al dueño y dos backups se
+ * pisan escribiendo el mismo archivo.
+ *
+ * La PK es el nombre del trabajo (`resumen_diario`, `backup`): hay una sola
+ * fila por trabajo y se reescribe, así que la tabla no crece nunca. No es un
+ * historial —para eso está el log— es el estado de "¿se puede correr ahora?".
+ *
+ * Cómo lo usan los dos casos (`src/domain/job-runs.ts`, O6):
+ *
+ *  - **una vez por día**: se compara `last_ok_at` contra el día calendario de
+ *    Asunción. Se mira el último **éxito** y no el último intento, porque un
+ *    intento fallido a las 8:00 tiene que poder reintentarse a las 9:00.
+ *  - **lock**: `started_at` sin `finished_at` significa "hay una corrida
+ *    viva". Con expiración por tiempo, porque un proceso que muere no libera
+ *    nada y un lock eterno es peor que dos backups.
+ */
+export const jobRuns = mysqlTable('job_runs', {
+  /** `resumen_diario` | `backup`. La PK: una fila por trabajo, se reescribe. */
+  job: varchar('job', { length: 60 }).primaryKey(),
+  startedAt: timestamp('started_at').notNull().defaultNow(),
+  /** NULL = corriendo (o muerta a mitad: por eso el lock expira). */
+  finishedAt: datetime('finished_at'),
+  /** El último éxito. Es lo que decide "ya corrió hoy". */
+  lastOkAt: datetime('last_ok_at'),
+  /** El motivo del último fallo, recortado. Para el panel y para el log. */
+  lastError: varchar('last_error', { length: 500 }),
+  /** Lo que produjo la corrida (cantidades, no datos de nadie). */
+  payload: json('payload'),
+});
+
+/**
+ * **Todas** las tablas de este schema, en orden de dependencia (las que no
+ * dependen de nadie primero).
+ *
+ * Existe para el backup de O8, y el orden es lo que la hace útil: restaurar en
+ * este orden nunca choca contra una FK, porque cada tabla llega después de
+ * aquellas a las que apunta.
+ *
+ * **Lista explícita y no `SHOW TABLES`**, a propósito. Con `SHOW TABLES` una
+ * tabla nueva entraría sola al backup y nadie decidiría nada; el día que
+ * alguien agregue una tabla que **no** debe copiarse —o una que sí y hay que
+ * ubicar bien en el orden— nada avisaría. Con la lista, hay un test que
+ * compara esto contra las tablas declaradas en el archivo y falla si alguien
+ * agrega una y se olvida: la decisión se toma una vez, a mano, y queda escrita.
+ */
+export const BACKUP_TABLES = [
+  // Sin dependencias.
+  'counters',
+  'setup_state',
+  'job_runs',
+  'users',
+  'customers',
+  'categories',
+  'coupons',
+  'shipping_zones',
+  'shipping_methods',
+  'payment_events',
+  // Cuelgan de las de arriba.
+  'bank_details',
+  'login_tokens',
+  'products',
+  'product_images',
+  'variants',
+  'stock_alerts',
+  'price_adjustments',
+  'stock_adjustments',
+  'orders',
+  'order_items',
+  'order_events',
+  'order_notes',
+  'payments',
+  'refunds',
+  'receipts',
+  'stock_reservations',
+] as const;
+
+export type BackupTable = (typeof BACKUP_TABLES)[number];

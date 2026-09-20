@@ -3,13 +3,12 @@ import Link from "next/link";
 
 import { CsvDownloadButton } from "@/components/admin/csv-download";
 import { ProductFilters } from "@/components/admin/product-filters";
-import { ProductImage } from "@/components/product-image";
+import { ProductList } from "@/components/admin/product-list";
 import { listAdminProducts, listCategories } from "@/domain/admin-products";
 import { isAdminProductSort } from "@/lib/admin-product-sort";
-import { formatGs } from "@/lib/money";
 import { requireCapabilityPage } from "@/lib/admin-guard";
 import { can } from "@/lib/permissions";
-import { t, tPlural } from "@/i18n";
+import { t } from "@/i18n";
 
 export const metadata: Metadata = { title: t("panel.productos.meta") };
 
@@ -32,11 +31,14 @@ export default async function AdminProductsPage({ searchParams }: { searchParams
   const rawSort = first(query.orden);
   const sort = isAdminProductSort(rawSort) ? rawSort : "recientes";
   const rawPage = Number(first(query.pagina) ?? 1);
+  // == S17 == Filtro "sólo destacados". Ausente = todos, igual que hoy.
+  const featured = first(query.destacados) === "1" ? true : undefined;
 
   const [result, categories] = await Promise.all([
     listAdminProducts({
       search,
       categoryId,
+      featured,
       sort,
       page: Number.isFinite(rawPage) ? rawPage : 1,
     }),
@@ -48,6 +50,7 @@ export default async function AdminProductsPage({ searchParams }: { searchParams
     if (search) params.set("q", search);
     if (categoryId) params.set("categoria", String(categoryId));
     if (sort !== "recientes") params.set("orden", sort);
+    if (featured) params.set("destacados", "1");
     if (page > 1) params.set("pagina", String(page));
     const qs = params.toString();
     return qs === "" ? "/admin/productos" : `/admin/productos?${qs}`;
@@ -78,6 +81,7 @@ export default async function AdminProductsPage({ searchParams }: { searchParams
             una categoría la perdería y devolvería el catálogo entero. */}
         {categoryId ? <input type="hidden" name="categoria" value={String(categoryId)} /> : null}
         {sort !== "recientes" ? <input type="hidden" name="orden" value={sort} /> : null}
+        {featured ? <input type="hidden" name="destacados" value="1" /> : null}
         <button type="submit" className="border-border rounded-lg border px-4 text-sm">
           {t("panel.filtros.buscar")}
         </button>
@@ -91,6 +95,7 @@ export default async function AdminProductsPage({ searchParams }: { searchParams
         categoryId={categoryId}
         sort={sort}
         search={search}
+        featured={featured ?? false}
       />
 
       {result.rows.length === 0 ? (
@@ -98,59 +103,29 @@ export default async function AdminProductsPage({ searchParams }: { searchParams
           {t("panel.productos.sinResultados")}
         </p>
       ) : (
-        <ul className="mt-4 grid gap-3">
-          {result.rows.map((product) => (
-            <li key={product.id}>
-              <Link
-                href={`/admin/productos/${product.id}`}
-                className="border-border hover:bg-muted/50 flex items-center gap-3 rounded-xl border p-3"
-              >
-                {/* Miniatura chica: el dueño reconoce el producto por la foto
-                    mucho antes que por el nombre, y son 24 filas en un
-                    celular. */}
-                <ProductImage
-                  image={
-                    product.imageCloudinaryId
-                      ? {
-                          cloudinaryId: product.imageCloudinaryId,
-                          alt: product.imageAlt,
-                          blurDataUrl: null,
-                        }
-                      : null
-                  }
-                  alt={product.name}
-                  categorySlug={product.categorySlug}
-                  size="thumb"
-                  className="w-14 shrink-0"
-                  sizes="56px"
-                />
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                    <span className="font-medium">{product.name}</span>
-                    <span className="text-sm tabular-nums">
-                      {product.minPricePyg === null
-                        ? t("panel.productos.sinPrecio")
-                        : formatGs(product.minPricePyg)}
-                    </span>
-                  </div>
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    {product.categoryName} ·{" "}
-                    {tPlural("panel.productos.variantes", product.variantCount)} ·{" "}
-                    <span className={product.onHand === 0 ? "text-destructive font-medium" : ""}>
-                      {t("panel.productos.enStock", { n: product.onHand })}
-                    </span>
-                    {!product.isActive || product.publishedAt === null ? (
-                      <span className="text-foreground font-medium">
-                        {t("panel.productos.sinPublicar")}
-                      </span>
-                    ) : null}
-                  </p>
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        // Selección y acciones masivas (O7 §5.3 B): el listado en sí es
+        // idéntico al de antes de este PR, movido a un componente cliente
+        // porque la barra de acciones necesita saber qué filas están
+        // tildadas — eso no se puede guardar del lado del servidor.
+        <ProductList
+          rows={result.rows.map((product) => ({
+            id: product.id,
+            slug: product.slug,
+            name: product.name,
+            categoryName: product.categoryName,
+            categorySlug: product.categorySlug,
+            variantCount: product.variantCount,
+            minPricePyg: product.minPricePyg,
+            onHand: product.onHand,
+            isActive: product.isActive,
+            publishedAt: product.publishedAt ? product.publishedAt.toISOString() : null,
+            imageCloudinaryId: product.imageCloudinaryId,
+            imageAlt: product.imageAlt,
+            isFeatured: product.isFeatured,
+          }))}
+          categories={categories.map((category) => ({ id: category.id, name: category.name }))}
+          canBulkPrice={can(actor.role, "precios.masivo")}
+        />
       )}
 
       {result.totalPages > 1 ? (

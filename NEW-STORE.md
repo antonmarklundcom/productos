@@ -177,9 +177,11 @@ Los productos reales entran por dos caminos:
 
 - **Pocos, o de a uno:** el panel, `/admin/productos`.
 - **El catálogo entero de una vez:** `pnpm importar:productos lista.csv`. El
-  comercio ya tiene su lista de precios en Excel; el formato es el mismo que
-  baja el export del panel (una fila por variante: SKU, Producto, Categoría,
-  Variante, Precio (₲), Stock) más columnas opcionales — Descripción, Marca,
+  comercio ya tiene su lista de precios en Excel; las columnas obligatorias son
+  SKU, Producto, Categoría y Precio (₲). Variante y Stock son opcionales:
+  Variante vacía significa variante única y Stock vacío significa 0 al crear,
+  sin tocarlo al reimportar. El formato es el mismo que baja el export del
+  panel (una fila por variante) más columnas opcionales — Descripción, Marca,
   IVA, Precio antes (₲), Slug. Separador `;` o `,`, como venga. Sin `--aplicar`
   es un ensayo que sólo cuenta; los errores salen todos juntos con número de
   línea. Idempotente: re-importar actualiza precios sin duplicar y **no pisa el
@@ -194,9 +196,10 @@ sin volver a tocar código:
 |---|---|---|
 | Categorías del menú | `/admin/categorias` | Desactivar una **le saca de la vidriera también a sus productos**; la pantalla te dice cuántos antes de confirmar. Cambiar el slug rompe las URLs viejas: no hay redirección. |
 | Zonas de envío | `/admin/envios` | Las del seed son las de Gran Asunción. Una ciudad va en **una sola** zona. La ciudad que no esté en ninguna lista se cobra como la zona activa más cara — conviene tener una zona *Interior* sin ciudades y cara, que haga de comodín. |
+| Formas de entrega | `/admin/envios` (abajo) | Courier, moto propia, retiro en el local — y con cuáles se puede pagar. **Vacío está bien**: sin ninguna, el checkout ofrece "Envío a domicilio" con el precio de la zona y los tres medios de pago, que es cómo funcionó siempre. Ver §4e. |
 | Datos bancarios | `/admin/banco` | A dónde transfieren. Vacío, la página del pedido avisa en vez de inventar una cuenta. Ver §4a. |
 
-Las tres pantallas son owner-only.
+Todas esas pantallas son owner-only.
 
 ### 4a. Los datos bancarios se cargan desde el navegador
 
@@ -305,6 +308,62 @@ imprime en la consola del servidor igual que el código de login. El envío nunc
 puede demorar ni hacer fallar un pedido: sale después de que el pedido está
 guardado, y salga o falle queda anotado en la historia del pedido.
 
+**Tres plantillas más: los avisos a la COMPRADORA.** Además del aviso al
+comercio, la tienda le puede avisar a quien compró en cada uno de tres
+momentos — que su pedido quedó **confirmado**, que se **pagó** y que **salió**
+— sin que ella tenga que tocar nada. Son tres plantillas nuevas, una decisión
+por evento (podés prender sólo la de pago, por ejemplo), con la misma regla
+de siempre: un parámetro en el cuerpo, aprobada por Meta:
+
+| Momento | Variable |
+|---|---|
+| Pedido registrado (justo después de crearse) | `WHATSAPP_CLOUD_TEMPLATE_CLIENTE_CONFIRMADO` |
+| Pago registrado (transferencia aprobada, Pagopar acreditado o contra entrega confirmada) | `WHATSAPP_CLOUD_TEMPLATE_CLIENTE_PAGADO` |
+| Pedido enviado | `WHATSAPP_CLOUD_TEMPLATE_CLIENTE_ENVIADO` |
+
+El destino de los tres es el WhatsApp que dejó cada compradora en su pedido —
+no hace falta ninguna variable de número. Y a diferencia del aviso al
+comercio, acá **cada plantilla vacía apaga sólo ese aviso, ni siquiera por la
+consola de dev**: cuál de los tres manda esta tienda es una decisión suya, no
+un default que conviene probar sin haberla tomado. `pnpm preflight` avisa por
+separado de cada una que falte, siempre como advertencia. Mismas garantías que
+el resto de esta familia: nunca frenan ni demoran una transición, un fallo de
+envío no hace nada más que quedar anotado en la historia del pedido, y no se
+manda el mismo aviso dos veces para el mismo pedido.
+
+**Dos plantillas más (O6): el resumen diario y "avisame cuando haya stock".**
+Misma regla de siempre — un parámetro en el cuerpo, aprobada por Meta, vacía =
+apagada:
+
+| Para qué | Variable | Destino |
+|---|---|---|
+| El resumen de la mañana al dueño: comprobantes por revisar, pedidos sin pagar hace más de un día, stock bajo, ventas de ayer | `WHATSAPP_CLOUD_TEMPLATE_RESUMEN_DIARIO` | `WHATSAPP_NUMBER` |
+| "Volvió a haber stock de X": lo recibe quien se anotó en una variante agotada | `WHATSAPP_CLOUD_TEMPLATE_STOCK_DISPONIBLE` | el teléfono que dejó cada compradora |
+
+El resumen **necesita además la entrada de cron diaria del hPanel** (DEPLOY.md
+§5): sin ella la plantilla está cargada y no se manda nada. `pnpm preflight`
+avisa si falta la plantilla; de la entrada de cron no puede saber nada.
+
+La de stock es opcional de verdad y su interruptor apaga **la feature entera**:
+sin ella el formulario "avisame" no se dibuja y el alta se rechaza. Es a
+propósito — guardar suscripciones que después nadie va a poder avisar sería
+prometerle algo a una compradora que la tienda no puede cumplir.
+
+**Una más (O15): el recordatorio de pago.** La que más se paga sola de todas.
+
+Contra entrega no recibe este recordatorio: aunque el pedido está en
+`pendiente_pago`, la compradora no tiene nada que pagar antes de recibir.
+
+| Para qué | Variable | Destino |
+|---|---|---|
+| "Tu pedido todavía está esperando el pago, podés pagarlo hasta las 18:40" — sale una sola vez por pedido, cuando le quedan menos de 6 h de reserva | `WHATSAPP_CLOUD_TEMPLATE_CLIENTE_RECORDATORIO` | el teléfono que dejó cada compradora |
+
+**No necesita una entrada de cron nueva**: viaja en la de `vencer-pedidos` que
+ya está cada 15 minutos (DEPLOY.md §5), y sale después de vencer, así que un
+pedido recién vencido nunca recibe un aviso para pagarlo. Vacía = apagado, y la
+tienda queda exactamente como antes: el pedido que la compradora se olvidó
+vence en silencio. `pnpm preflight` lo dice como advertencia.
+
 ### 4d. ¿En qué idioma habla esta tienda?
 
 Por defecto `es-PY`, y las URLs quedan en español siempre (son parte del
@@ -333,6 +392,124 @@ entero.
 dinero. No hay switcher para el visitante ni rutas por idioma — eso sería otra
 fase.
 
+### 4e. Formas de entrega (courier, moto, retiro)
+
+**Esto es opcional y se puede dejar para después.** Una tienda recién clonada
+no tiene ninguna forma de entrega cargada, y así el checkout se comporta
+exactamente como venía: una sola opción implícita, *Envío a domicilio*, con el
+precio de la zona y los tres medios de pago. Todo lo de acá es para el comercio
+que entrega de más de una manera.
+
+Se cargan en `/admin/envios`, debajo de las zonas. Cada forma de entrega tiene:
+
+| Campo | Qué hace |
+|---|---|
+| **Tipo** | `Courier` (empresa que lleva), `Reparto propio` (tu moto) o `Retiro en el local`. Retiro no viaja: no cobra flete ni usa zonas, pongas lo que pongas. |
+| **Cómo se cobra** | *Con el precio de la zona* (y conserva el envío gratis desde el umbral de esa zona) o *Tarifa plana* (lo mismo siempre, sin umbral). |
+| **Zonas donde aplica** | Sin ninguna tildada, aplica a **todas** las zonas activas — el caso del courier nacional. Tildá zonas sólo si esa forma de entrega llega nada más que ahí. |
+| **Medios de pago habilitados** | Al menos uno. Es lo que ve quien compra después de elegir esta entrega. |
+| **Descripción** | Una línea para el checkout: "Llega en 24-48 h a todo el país". |
+
+**El campo que justifica toda la pantalla es el de los medios de pago.** Contra
+entrega sólo tiene sentido donde alguien tuyo va a estar en la puerta para
+cobrar: dejalo tildado en la moto propia y destildalo en el courier. El checkout
+filtra solo, y el servidor rechaza el pedido si alguien fuerza la combinación.
+
+Una configuración típica de un comercio de Asunción que también manda al
+interior:
+
+| Nombre | Tipo | Cómo se cobra | Zonas | Se paga con |
+|---|---|---|---|---|
+| Moto Asunción | Reparto propio | Tarifa plana ₲15.000 | Asunción, Gran Asunción | Transferencia, contra entrega |
+| Courier nacional | Courier | Precio de la zona | (ninguna: todas) | Transferencia, tarjeta |
+| Retiro en el local | Retiro | — | — | Transferencia, contra entrega |
+
+El orden importa: es el que ve quien compra, y el primero es el que se usa si
+el navegador no eligió ninguno. Se cambia con las flechas.
+
+Dos cosas que conviene saber antes de tocar nada:
+
+- **Cambiar o borrar una forma de entrega no toca los pedidos ya hechos.** El
+  flete quedó copiado en el pedido, y también el nombre con el que se entregó.
+- **`pnpm preflight` avisa** si dejaste una forma de entrega prendida cuyas
+  zonas están todas apagadas: está activa, se ve activa, y no le aparece a
+  nadie en el checkout.
+
+### 4f. La operación diaria del panel (S9–S11, después del lanzamiento)
+
+Nada de esto necesita configuración — viene andando desde que la tienda sale
+del template. Lo que sigue es sólo dónde encontrarlo:
+
+- **Seguimiento del envío y remito.** Al despachar un pedido (`enviado`), el
+  panel pide courier, número de guía y link de seguimiento — los tres
+  opcionales. Quedan en un bloque "Seguimiento" en la ficha del pedido y en
+  `/pedido/[número]`, la página que ve la compradora. Desde la ficha,
+  `/admin/pedidos/[id]/imprimir` arma un remito en A4 (sin precios si quien
+  imprime es `vendedor`) listo para pegar en el paquete.
+- **Notas internas.** Un textarea arriba del historial de cada pedido, para lo
+  que dijeron por teléfono — nunca lo ve la compradora, la puede escribir
+  cualquiera de los tres roles (`pedidos.notas`, ARCH.md §1).
+- **Resumen diario y "avisame cuando haya stock".** Ya están en §4c —dos
+  plantillas de Meta, vacías = apagado— y necesitan además la entrada de cron
+  del hPanel (DEPLOY.md §5).
+- **Punto de reposición por variante.** En el editor de cada variante: un
+  número entero, vacío = usa el default global (3). Por debajo de ese número,
+  la variante entra en "stock bajo" en `/admin` y en el resumen diario.
+- **Destacados y categorías con foto.** El toggle "Destacado" del formulario
+  de producto elige lo que muestra la home bajo el título "Destacados"; sin
+  ninguno elegido, la home sigue mostrando "Novedades" como siempre.
+  `/admin/categorias` acepta una descripción y una foto por categoría —
+  aparecen arriba de la grilla en `/categoria/<slug>` cuando están cargadas, y
+  la descripción entra también en el `<meta name="description">` de esa
+  página.
+- **Acciones masivas y precios por porcentaje.** En `/admin/productos`,
+  seleccionar varios productos habilita activar, desactivar, mover de
+  categoría y —sólo `owner`— ajustar precios por porcentaje con una vista
+  previa antes de confirmar. Cada ajuste deja su fila de auditoría
+  (`price_adjustments`, ARCH.md §2).
+- **Reembolso parcial.** Vive junto al botón de devolución total (dashboard,
+  "Pagos sin pedido vivo"): un monto menor al total dejando el pedido como
+  está, con su fila en el ledger de devoluciones (`refunds`, ARCH.md §2).
+- **Backups automáticos y restauración.** Corren solos con la entrada de cron
+  del hPanel (DEPLOY.md §5, tercera entrada) — nada que prender a mano más
+  allá de tener Cloudinary configurado. Restaurar una copia es
+  `pnpm restore -- <archivo.jsonl.gz>` (README.md, DEPLOY.md §"Restaurar una
+  copia"): sólo corre contra una base cuyo nombre contenga `restore` o `test`.
+
+### La distribución automática del template (S13)
+
+Cada push a `main` de `antonmarklundcom/ecom` dispara
+`.github/workflows/distribuir.yml` en el template, que le abre (o actualiza)
+un PR de maquinaria a cada tienda listada en la raíz de `tiendas.json` — el
+mismo `pnpm template:sync` de arriba, corrido por una acción en vez de a mano.
+Es lo que hace que el paso 1 de "Arreglos que aparecen después" deje de ser
+manual.
+
+**Para que una tienda reciba estos PRs, alguien con acceso al repo del
+template tiene que:**
+
+1. Agregarla a `tiendas.json` en la raíz del template:
+
+   ```json
+   [{ "repo": "antonmarklundcom/mi-tienda" }]
+   ```
+
+2. Tener cargado el secret `TIENDAS_TOKEN` en el repo del template: un PAT de
+   GitHub con `contents:write` + `pull-requests:write` sobre esa(s) tienda(s).
+   Sin el secret, el workflow se salta solo y lo dice en el log — no hace
+   nada a medias.
+
+El PR que abre en la tienda trae **sólo lo que `template:sync` clasifica como
+maquinaria** (los mismos límites de siempre: `fable/` se descarta, el
+lockfile se regenera, los workflows de CI se quedan con la versión del
+template). Si `template:sync` se para en un conflicto real, el PR igual se
+abre —**en draft**—, con lo que sí entró limpio más el commit, el archivo y
+los pasos para terminarlo a mano en el cuerpo. El CI de cada tienda decide si
+se mergea; nadie mergea por ella. Los commits de piel (S9, S10, S11 de este
+mismo plan, o cualquier rediseño) **no viajan por acá** — siguen siendo
+`git cherry-pick` a mano si la tienda no rediseñó esa pantalla, tal como
+describe § "Migraciones que llegan por `template:sync`" más abajo.
+
 ### 5. Diseño
 
 **La portada de la home** se cambia sin tocar código: `hero` en
@@ -358,6 +535,21 @@ Qué se puede redibujar libremente y qué no:
 Regla práctica: si el archivo toca plata, stock o estados de pedido, no se
 toca por tienda. Si sólo dibuja, es libre.
 
+#### La única excepción: los `data-testid`
+
+Los specs de `tests/e2e/**` (compra, panel de admin, CSP) localizan los
+elementos por `data-testid`, nunca por texto ni por markup — es lo que les
+permite correr contra el catálogo real de cualquier tienda, no sólo el del
+seed. El contrato completo, con qué elemento lleva cada id, vive en
+[`src/lib/testids.ts`](./src/lib/testids.ts).
+
+Rediseñar es libre —cambiar clases, mover el elemento, reescribir el texto
+que lleva adentro—, con una sola regla: **no le saques el atributo
+`data-testid` a un elemento que ya lo tiene.** Agregarle uno a un elemento
+nuevo no rompe nada; sacarle el que ya tenía rompe el spec que lo busca, en
+esta tienda y en la próxima sincronización. `tests/unit/testids-contrato.test.ts`
+avisa si alguno de la lista deja de aparecer en `src/`.
+
 ### 6. Antes de cobrar de verdad
 
 ```bash
@@ -373,33 +565,97 @@ registrar la URL de respuesta de Pagopar.
 
 ---
 
-## Arreglos que aparecen después
+## Arreglos que aparecen después — ya tengo una tienda
 
 Los repos creados desde un template **no reciben** los commits posteriores del
 template. Si arreglás un bug de checkout acá, las tiendas ya creadas no se
 enteran.
 
-`pnpm template:diff` te dice cuáles le faltan a **esta** tienda:
+`pnpm template:diff` te dice qué le falta a **esta** tienda; `pnpm
+template:sync` lo trae. Los merge commits de PR no se listan ni se traen: viajan sus commits individuales. El flujo completo:
 
 ```bash
-git remote add template git@github.com:antonmarklundcom/ecom.git
+git remote add template git@github.com:antonmarklundcom/ecom.git   # una vez
+git checkout -b poner-al-dia-template   # nunca sobre main
+pnpm template:sync                      # trae la maquinaria, commit por commit
+pnpm template:diff                      # ¿queda algo marcado con ~? revisalo a mano
+git push -u origin poner-al-dia-template && gh pr create   # o el flujo de PR que uses
+```
+
+`template:sync` cherry-pickea, del más viejo al más nuevo, **sólo** los
+commits marcados como maquinaria (ver `template:diff` abajo) — nunca toca
+`main` directamente. Resuelve solo los tres conflictos que se repiten en toda
+sincronización real: descarta `fable/` del lado del template (las tiendas no
+tienen el plan de endurecimiento), regenera `pnpm-lock.yaml` con `pnpm install
+--lockfile-only` en vez de tocarlo a mano, y en los workflows de
+`.github/workflows/*.yml` se queda con la versión del template. Con cualquier
+otro conflicto —en `src/`, casi siempre porque vos y el template tocaron la
+misma línea— **para en seco**, deja todo lo demás ya aplicado y te dice qué
+commit, qué archivo y cómo seguir (`git cherry-pick --continue` y volver a
+correr `pnpm template:sync`, que retoma solo desde ahí). Al final corre
+`pnpm typecheck && pnpm lint && pnpm test`: si algo falla, los commits quedan
+aplicados pero `.template-baseline` no se mueve, para que puedas arreglar y
+reintentar sin perder lo ya traído.
+
+```bash
+pnpm template:sync --dry-run        # qué traería, sin tocar nada
+pnpm template:sync --hasta <sha>    # parar en un commit dado
+pnpm template:sync --sin-tests      # no correr typecheck/lint/test al final
+```
+
+Si preferís el camino manual (o `template:sync` te frenó en un conflicto y
+querés ver el resto antes de reintentar), `pnpm template:diff` sigue
+sirviendo solo:
+
+```bash
 pnpm template:diff              # qué commits del template no están acá
-git cherry-pick <sha> <sha>     # los que quieras traer
+git cherry-pick <sha> <sha>     # los que quieras traer a mano
 pnpm template:diff --marcar     # "ya me puse al día"
 ```
 
 Marca con `*` los que tocan la maquinaria (`src/domain`, `src/lib`, `src/db`,
-`src/app/api`, `src/app/actions`, `scripts`, `drizzle`): ésos los quiere toda
-tienda. El resto suele ser piel que vos reescribiste, y cherry-pickearlo te pisa
-el rediseño. Con `~` marca `src/components/checkout-form.tsx` y `src/app/admin`:
-markup tuyo con lógica compartida adentro, así que ahí leé el diff en vez de
-cherry-pickear. Las *actions* de admin sí van con `*` — ahí está la plata.
+`src/app/api`, `src/app/actions`, `scripts`, `drizzle`, `.github/workflows`):
+ésos los quiere toda tienda, y son los que trae `template:sync`. El resto
+suele ser piel que vos reescribiste, y cherry-pickearlo te pisa el rediseño.
+Con `~` marca `src/components/checkout-form.tsx` y `src/app/admin`: markup
+tuyo con lógica compartida adentro, así que ahí leé el diff en vez de
+cherry-pickear — ni `template:diff` ni `template:sync` lo tocan solos. Las
+*actions* de admin sí van con `*` — ahí está la plata.
 
 **Trampa:** un repo hecho con "Use this template" **no comparte historia** con
 el original, así que `git log HEAD..template/main` lista todo y no sirve. Por
-eso el comando guarda un punto de partida en `.template-baseline` —commitealo—
-y `--marcar` es el que lo mueve. Si te olvidás de marcar, los mismos commits
-te vuelven a aparecer para siempre.
+eso ambos comandos se apoyan en un punto de partida guardado en
+`.template-baseline` —commitealo—, que `template:diff --marcar` (o el commit
+final de `template:sync`) es lo que mueve. Si no hay `.template-baseline`
+todavía, corré `pnpm template:diff --marcar` una vez en un commit conocido
+antes de tocar `template:sync`.
+
+### Migraciones que llegan por `template:sync`
+
+Una migración del template es **maquinaria**: viaja marcada con `*` y
+`template:sync` la trae sola con el commit que la creó. Después del sync, en
+esta tienda hay que aplicarla como cualquier otra —`pnpm db:push` en local,
+`POST /api/setup/init` en el servidor (DEPLOY.md)— y `pnpm db:generate` tiene
+que quedar sin drift.
+
+La `0012` (plan de operación, fase O5) agrega el seguimiento del envío, las
+notas del pedido, el punto de reposición por variante, "avisame cuando haya
+stock", destacados, categorías con foto y descripción, el ledger de
+devoluciones y la tabla de trabajos programados. **Toda columna nueva es
+nullable o tiene default**, y eso es a propósito: una tienda que sincroniza el
+código antes que la migración tiene que seguir andando. Trae además un
+backfill escrito a mano (`src/db/backfills.ts`) que le arma la fila de ledger
+a cada devolución anterior a esta migración; sin él, la contabilidad de
+`pnpm reconcile` nace en rojo en toda tienda que ya devolvió plata alguna vez.
+
+La `0013` (plan de crecimiento, fase O14) agrega una sola columna,
+`orders.payment_reminder_sent_at`: la marca de que a ese pedido ya se le mandó
+el recordatorio de pago. Nullable, sin backfill — un pedido viejo sin la marca
+es exactamente lo que corresponde. Sin ella, la tienda anda igual; lo que no
+anda es el recordatorio que agrega O15.
+
+Sigue valiendo lo de siempre: Dependabot no mueve nada de esto y las columnas
+no se agregan a mano en el hPanel — la migración es la única fuente.
 
 Si algún día son muchas tiendas, recién ahí conviene sacar `src/domain` y
 `src/lib` a un paquete compartido. Antes de eso es complejidad sin pagar.

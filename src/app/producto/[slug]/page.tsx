@@ -4,14 +4,19 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 
 import { AddToCart } from "@/components/add-to-cart";
+import { ProductDescription } from "@/components/product-description";
 import { ProductImage } from "@/components/product-image";
 import { ProductCard } from "@/components/product-card";
+import { RecentlyViewed } from "@/components/recently-viewed";
 import { getProductBySlug, getRelatedProducts } from "@/db/queries";
+import { stockAlertsEnabled } from "@/domain/stock-alerts";
 import { t } from "@/i18n";
-import { comercioWaLink } from "@/lib/comercio";
+import { comercioWaLink, comercioWhatsApp } from "@/lib/comercio";
 import { OG_IMAGE_SIZE, productImageUrl } from "@/lib/images";
+import { markdownToText } from "@/lib/markdown";
 import { formatGs } from "@/lib/money";
 import { jsonLdScript } from "@/lib/seo";
+import { siteOrigin } from "@/lib/site-url";
 
 /**
  * Ficha de producto.
@@ -37,8 +42,12 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
     undefined
   );
 
+  // `markdownToText` y no la descripción cruda (O7): desde que el campo acepta
+  // markdown, una que empiece con `**Importado**` publicaría literalmente los
+  // asteriscos en el resultado de Google. Es el único lugar de la vidriera que
+  // O7 toca — el render de la descripción en la página es de S11.
   const description =
-    product.description?.slice(0, 160) ??
+    markdownToText(product.description).slice(0, 160) ||
     t("producto.metaDescripcion", {
       nombre: product.name,
       precio: cheapest ? formatGs(cheapest) : "",
@@ -50,9 +59,18 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   // el link se comparte con la marca en vez de con un rectángulo gris.
   const ogImage = productImageUrl(product.images[0]?.cloudinaryId, "og");
 
+  // == S17 == Mismo criterio que `categoria/[slug]`: canonical a la URL
+  // limpia del producto, y sólo si hay origen configurado (`siteOrigin()`,
+  // nunca un dominio inventado). Esta ficha no arrastra filtros en la URL
+  // hoy, pero declarar el canonical explícito no le hace falta a un futuro
+  // parámetro de tracking para dejar de indexarse como página aparte.
+  const origin = siteOrigin();
+  const canonical = origin ? new URL(`/producto/${slug}`, origin).toString() : undefined;
+
   return {
     title: product.name,
     description,
+    ...(canonical ? { alternates: { canonical } } : {}),
     openGraph: {
       title: product.name,
       description,
@@ -100,13 +118,22 @@ export default async function ProductPage({ params }: { params: Params }) {
 
   const waHref = comercioWaLink(t("producto.consultaWhatsApp", { nombre: product.name }));
 
+  // Para el link de consulta por variante (`variant-inquiry-link.tsx`, cliente):
+  // el teléfono sale de una variable sin `NEXT_PUBLIC_`, así que se resuelve
+  // acá, en el servidor, y se pasa ya normalizado — el componente cliente
+  // nunca lee `process.env`.
+  const whatsappPhone = comercioWhatsApp();
+  const origin = siteOrigin();
+  const productUrl = origin ? `${origin.origin}/producto/${product.slug}` : null;
+
   // JSON-LD: PYG y priceValidUntil no se inventan — se dejan afuera si no
   // hay dato, que es mejor que un dato falso en el rich result.
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Product",
     name: product.name,
-    description: product.description ?? undefined,
+    // Mismo motivo que arriba: el JSON-LD que lee Google es texto, no markdown.
+    description: markdownToText(product.description) || undefined,
     brand: product.brand ? { "@type": "Brand", name: product.brand } : undefined,
     sku: product.variants[0]?.sku,
     offers: product.variants.map((variant) => ({
@@ -170,7 +197,12 @@ export default async function ProductPage({ params }: { params: Params }) {
           <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">{product.name}</h1>
 
           <div className="mt-6">
-            <AddToCart product={product} />
+            <AddToCart
+              product={product}
+              stockAlertsEnabled={stockAlertsEnabled()}
+              whatsappPhone={whatsappPhone}
+              productUrl={productUrl}
+            />
           </div>
 
           {waHref ? (
@@ -187,9 +219,7 @@ export default async function ProductPage({ params }: { params: Params }) {
           {product.description ? (
             <div className="border-border mt-8 border-t pt-6">
               <h2 className="text-sm font-medium">{t("producto.descripcion")}</h2>
-              <p className="text-muted-foreground mt-2 text-sm whitespace-pre-line">
-                {product.description}
-              </p>
+              <ProductDescription markdown={product.description} className="mt-2 text-sm" />
             </div>
           ) : null}
 
@@ -222,6 +252,16 @@ export default async function ProductPage({ params }: { params: Params }) {
           </div>
         </section>
       ) : null}
+
+      <RecentlyViewed
+        current={{
+          slug: product.slug,
+          name: product.name,
+          pricePyg: cheapest ?? product.variants[0]?.pricePyg ?? 0,
+          imageCloudinaryId: product.images[0]?.cloudinaryId ?? null,
+          imageAlt: product.images[0]?.alt ?? null,
+        }}
+      />
     </main>
   );
 }

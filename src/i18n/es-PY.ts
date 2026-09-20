@@ -253,6 +253,13 @@ export const esPY = {
   "checkout.pago.tarjeta": "Tarjeta / Pagopar",
   "checkout.pago.tarjeta.ayuda":
     "Pagás online, ahora, con tarjeta u otros medios de Pagopar.",
+  "checkout.pago.sinOpciones":
+    "Esa forma de entrega no tiene ningún medio de pago habilitado. Elegí otra.",
+
+  "checkout.envio.pregunta": "¿Cómo querés recibirlo?",
+  "checkout.envio.sinMetodos":
+    "No tenemos ninguna forma de entrega para esa ciudad. Escribinos por WhatsApp y lo resolvemos.",
+  "envio.metodo.implicito": "Envío a domicilio",
 
   "checkout.regalo": "Es un regalo",
   "checkout.regalo.ayuda": "Lo preparamos para regalar y, si querés, le sumamos un mensaje.",
@@ -456,11 +463,30 @@ export const esPY = {
     "El total cambió de {antes} a {despues} mientras completabas los datos. Revisalo y confirmá de nuevo.",
   "error.checkout.cuponCaido":
     "El código de descuento ya no se puede usar. Revisá el total y confirmá de nuevo.",
+  "error.checkout.sinMetodoEnvio":
+    "No tenemos ninguna forma de entrega para esa ciudad. Escribinos por WhatsApp y lo resolvemos.",
+  "error.checkout.metodoEnvioCaido":
+    "La forma de entrega que elegiste ya no está disponible. Elegí otra y confirmá de nuevo.",
+  "error.checkout.pagoNoPermitido":
+    "{envio} no acepta {pago}. Elegí otro medio de pago o cambiá la forma de entrega.",
   "error.checkout.demasiadosIntentos":
     "Demasiados intentos seguidos. Esperá unos minutos y probá de nuevo.",
   "error.checkout.revisaDatos": "Revisá los datos del formulario.",
   "error.checkout.sinTarjeta": "El pago con tarjeta no está disponible en este momento.",
   "error.checkout.generico": "No pudimos crear el pedido. Probá de nuevo en un momento.",
+
+  // == O6 · avisame cuando haya stock ==
+  "error.avisoStock.apagado": "Por ahora no podemos avisarte. Escribinos por WhatsApp y te contamos.",
+  "error.avisoStock.noExiste": "Ese producto ya no está disponible.",
+  "error.avisoStock.hayStock": "¡Buena noticia! Ya hay stock: podés comprarlo ahora.",
+  "error.avisoStock.demasiados":
+    "Ya nos pediste varios avisos. Probá de nuevo más tarde.",
+
+  // == O5 · notas internas del pedido ==
+  "error.nota.vacia": "Escribí algo en la nota.",
+  "error.nota.larga": "La nota no puede pasar de {maximo} caracteres.",
+  "error.nota.pedidoNoExiste": "No encontramos ese pedido.",
+  "error.nota.usuarioInactivo": "Tu usuario ya no tiene acceso al panel.",
 
   "error.comprobante.vacio": "El archivo está vacío.",
   "error.comprobante.pesado": "El comprobante no puede pesar más de 5 MB.",
@@ -523,7 +549,50 @@ export const esPY = {
   // toque de distancia, y el mensaje llega a la pantalla de bloqueo igual.
   // -------------------------------------------------------------------------
   "wa.aviso.pedidoNuevo": "Pedido nuevo {numero} — {total} ({metodo}). Compró {nombre}.",
+  "wa.aviso.pedidoNuevo.envio": "Entrega: {metodo}.",
   "wa.aviso.pedidoNuevo.url": "Miralo en el panel: {url}",
+
+  // -------------------------------------------------------------------------
+  // Avisos a la COMPRADORA por WhatsApp: confirmado, pagado, enviado (O3).
+  //
+  // Los manda el servidor solo, sin que ella tenga que tocar nada — misma
+  // filosofía que el aviso al comercio: nunca frenan ni demoran una
+  // transición, y si faltan las variables el aviso queda apagado. Cada uno
+  // termina con el link a `/pedido/[numero]` para que pueda seguirlo.
+  // -------------------------------------------------------------------------
+  "wa.cliente.confirmado": "Hola {nombre}! Tu pedido {numero} en {tienda} quedó confirmado. Total: {total}.",
+  "wa.cliente.confirmado.envio": "Entrega: {metodo}.",
+  "wa.cliente.pagado": "Hola {nombre}! Recibimos el pago de tu pedido {numero} ({total}). ¡Gracias por tu compra!",
+  "wa.cliente.enviado": "Hola {nombre}! Tu pedido {numero} ya salió.",
+  "wa.cliente.enviado.envio": "Entrega: {metodo}.",
+  "wa.cliente.enviado.nota": "Nota: {nota}",
+  // == O6 · resumen diario al dueño ==
+  //
+  // Voseo y sin adornos: esto se lee de un vistazo a las ocho de la mañana,
+  // en el celular, antes de abrir el local.
+  "wa.resumen.titulo": "Resumen de hoy",
+  "wa.resumen.sinNovedades": "Sin novedades: nada pendiente y ayer no hubo ventas.",
+  "wa.resumen.comprobantes": "Comprobantes por revisar: {n}",
+  "wa.resumen.sinPagar": "Pedidos sin pagar hace más de un día: {n}",
+  "wa.resumen.sinPagarLinea": "· {numero} — {horas} h",
+  "wa.resumen.stockBajo": "Stock bajo: {n}",
+  "wa.resumen.stockBajoLinea": "· {producto} ({etiqueta}) — quedan {quedan}",
+  "wa.resumen.ayer": "Ayer: {n} pedidos, {total}",
+  "wa.resumen.ayerSinVentas": "Ayer no hubo ventas.",
+
+  // == O6 · avisame cuando haya stock ==
+  "wa.stock.disponible": "Hola! Volvió a haber stock de {producto} ({etiqueta}) en {tienda}.",
+  "wa.stock.verProducto": "Mirálo acá: {url}",
+
+  // == O5 · seguimiento del envío ==
+  // Tres formas de la misma línea porque las tres pasan de verdad: courier
+  // con guía, sólo courier (una moto propia, "Entrega propia"), y sólo guía
+  // (el comercio despacha por su cuenta y anota el número del remito).
+  "wa.cliente.enviado.seguimiento": "Transporte: {courier} · Guía {guia}",
+  "wa.cliente.enviado.courier": "Transporte: {courier}",
+  "wa.cliente.enviado.guia": "Guía: {guia}",
+  "wa.cliente.enviado.seguirEnvio": "Seguí tu envío: {url}",
+  "wa.cliente.verPedido": "Seguilo acá: {url}",
 
   // -------------------------------------------------------------------------
   // Errores del panel (PR R) — los lee el dueño, no la compradora
@@ -561,6 +630,29 @@ export const esPY = {
   "adminError.envio.noExiste": "Esa zona no existe.",
   "adminError.envio.ultimaActiva":
     "Es la última zona activa: sin ninguna, la tienda pasa a cobrar ₲0 de envío a todo el país sin avisar en ninguna pantalla. Si querés dejar de cobrar el flete, poné el precio de esta zona en ₲0.",
+
+  "adminError.metodo.nombreCorto": "El nombre necesita al menos 2 caracteres.",
+  "adminError.metodo.nombreLargo": "El nombre no puede pasar los 160 caracteres.",
+  "adminError.metodo.sinSlug":
+    "De ese nombre no sale ningún identificador. Escribí el slug a mano.",
+  "adminError.metodo.slugLargo": "El slug no puede pasar los 120 caracteres.",
+  "adminError.metodo.descripcionLarga":
+    "La descripción no puede pasar los 200 caracteres: es una línea para el checkout.",
+  "adminError.metodo.noEsNumero": "{campo} tiene que ser un número.",
+  "adminError.metodo.noEsEntero": "{campo} va en guaraníes enteros, sin centavos.",
+  "adminError.metodo.precioLabel": "La tarifa plana",
+  "adminError.metodo.precioNegativo": "La tarifa plana no puede ser negativa.",
+  "adminError.metodo.faltaPrecioFijo":
+    "Elegiste tarifa plana: poné cuánto cobra. Si el precio sale de las zonas, cambiá \"cómo se cobra\".",
+  "adminError.metodo.sinPagos":
+    "Elegí al menos un medio de pago: un método que no acepta ninguno no se puede elegir en el checkout.",
+  "adminError.metodo.demasiadasZonas": "Son demasiadas zonas para un solo método.",
+  "adminError.metodo.zonaInexistente":
+    "Alguna de las zonas elegidas ya no existe (ids: {ids}). Recargá la página y probá de nuevo.",
+  "adminError.metodo.slugRepetido": "Ya hay un método con el identificador \"{slug}\".",
+  "adminError.metodo.slugRepetidoOtro": "Ya hay otro método con el identificador \"{slug}\".",
+  "adminError.metodo.noPude": "No pude crear el método.",
+  "adminError.metodo.noExiste": "Ese método no existe.",
 
   // Datos bancarios (PR T). No son plata —no entran en ningún total— pero son
   // a dónde va la plata de otra persona, así que el RUC se verifica de verdad.
@@ -627,11 +719,36 @@ export const esPY = {
     "Ese pedido está cancelado y no se revive solo: si el comprador todavía lo quiere, armá uno nuevo. Si no, marcá el pago como devuelto.",
   "adminError.pago.sinMotivo":
     "Escribí por qué se devuelve: queda en el historial del pedido y es lo único que va a explicar esta plata dentro de seis meses.",
+  // == O7 · acciones masivas ==
+  "adminError.masivo.sinSeleccion": "No seleccionaste ningún producto.",
+  "adminError.masivo.demasiados":
+    "Son demasiados de una vez (máximo {maximo}). Filtrá y hacelo por tandas.",
+  "adminError.masivo.sinMotivo":
+    "Escribí por qué cambiás los precios: queda en el historial de cada variante y es lo único que va a explicar estos precios dentro de seis meses.",
+  "adminError.masivo.porcentajeEntero": "El porcentaje tiene que ser un número entero.",
+  "adminError.masivo.porcentajeFuera":
+    "El porcentaje tiene que estar entre {min} % y {max} %.",
+  "adminError.masivo.redondeoInvalido": "El redondeo tiene que ser a ₲100 o a ₲1.000.",
+  "adminError.masivo.categoriaNoExiste": "Esa categoría ya no existe.",
+  "adminError.masivo.categoriaApagada":
+    "Esa categoría está apagada: mover los productos ahí los saca a todos de la vidriera. Prendela primero.",
+  "adminError.masivo.productoNoExiste": "Ese producto ya no existe.",
+  "adminError.masivo.demasiadasCopias":
+    "Ya hay demasiadas copias de este producto. Renombrá o borrá alguna antes de duplicar de nuevo.",
+  "adminError.masivo.noPude": "No pude duplicar el producto. Probá de nuevo.",
+
+  // == O7 · reembolso parcial ==
+  "adminError.pago.montoInvalido": "El monto a devolver tiene que ser un número entero de guaraníes, mayor que cero.",
+  "adminError.pago.montoExcede":
+    "Ese monto supera lo que queda por devolver de este pago (₲ {disponible}). Recargá: puede que alguien ya haya devuelto una parte.",
+
   "adminError.pago.noEncontrado": "No encontramos ese pago.",
   "adminError.pago.pedidoNoExiste": "El pedido de ese pago ya no existe.",
   "adminError.pago.nadaQueDevolver": "Ese pago no está acreditado: no hay nada que devolver todavía.",
   "adminError.pago.pedidoRevivio":
     "Ese pedido volvió a estar vivo ({estado}) desde que abriste esta pantalla. Recargá y mirá el pedido antes de marcar una devolución.",
+  "adminError.pedido.reembolsoPorFormulario":
+    "La devolución se registra desde el formulario de devolución del pedido, no como cambio de estado.",
 
   // Validación de los formularios del panel.
   "adminError.revisaDatos": "Revisá los datos.",
@@ -641,10 +758,15 @@ export const esPY = {
   "adminError.noEntendi.devolucion": "Faltan datos para registrar la devolución.",
   "adminError.noEntendi.categoria": "No entendí qué categoría cambiar.",
   "adminError.noEntendi.zona": "No entendí qué zona cambiar.",
+  "adminError.noEntendi.metodo": "No entendí qué método de envío cambiar.",
   "adminError.noEntendi.cupon": "No entendí qué cupón cambiar.",
   "adminError.noEntendi.usuario": "No entendí qué usuario cambiar.",
   "adminError.noEntendi.rol": "No entendí qué rol poner.",
   "adminError.noEntendi.mover": "No entendí hacia dónde mover.",
+  // == O5 ==
+  "adminError.noEntendi.nota": "No entendí qué nota guardar.",
+  // == O7 ==
+  "adminError.noEntendi.masivo": "No entendí qué querés hacer con esos productos.",
   "adminError.comprobanteInvalido": "Comprobante inválido.",
   "adminError.productoInvalido": "Producto inválido.",
   "adminError.elegiFoto": "Elegí la foto.",
@@ -665,6 +787,8 @@ export const esPY = {
   "adminForm.motivoAjuste": "Escribí el motivo del ajuste",
   "adminForm.nombreCategoria": "Poné el nombre de la categoría",
   "adminForm.nombreZona": "Poné el nombre de la zona",
+  "adminForm.nombreMetodo": "Poné el nombre del método de envío",
+  "adminForm.pagosMetodo": "Elegí al menos un medio de pago",
   "adminForm.banco.banco": "Poné el nombre del banco",
   "adminForm.banco.titular": "Poné el titular de la cuenta",
   "adminForm.banco.ruc": "Poné el RUC del titular",
@@ -894,6 +1018,8 @@ export const esPY = {
   "panel.actividad.todo": "Todo",
   "panel.actividad.tipoPedido": "Cambios de pedido",
   "panel.actividad.tipoStock": "Ajustes de stock",
+  // == O5 ==
+  "panel.actividad.tipoNota": "Notas de pedidos",
   "panel.actividad.hastaIncluye": "Incluye todo ese día.",
   "panel.actividad.filtrar": "Filtrar",
 
@@ -971,6 +1097,54 @@ export const esPY = {
   "panel.zona.identificador": "Identificador",
   "panel.zona.identificadorAyuda":
     "Interno: no sale en ninguna URL. Sirve para distinguir dos zonas que se llamen parecido.",
+
+  "panel.metodo.titulo": "Formas de entrega",
+  "panel.metodo.bajada":
+    "Courier, moto propia o retiro en el local. Cada forma decide con qué se puede pagar: contra entrega sólo tiene sentido donde alguien tuyo va a estar en la puerta para cobrar.",
+  "panel.metodo.crear": "Agregar forma de entrega",
+  "panel.metodo.vacio":
+    "Todavía no hay ninguna. Sin métodos, el checkout ofrece \"Envío a domicilio\" con el precio de la zona y los tres medios de pago — exactamente como venía funcionando.",
+  "panel.metodo.nueva": "Forma de entrega nueva",
+  "panel.metodo.editarTitulo": "Editar {nombre}",
+  "panel.metodo.desactivado": " · desactivado",
+  "panel.metodo.creado": "Forma de entrega creada.",
+  "panel.metodo.actualizado": "Forma de entrega actualizada.",
+  "panel.metodo.activadoOk": "Forma de entrega activada.",
+  "panel.metodo.desactivadoOk": "Forma de entrega desactivada.",
+  "panel.metodo.kind.courier": "Courier",
+  "panel.metodo.kind.local": "Reparto propio",
+  "panel.metodo.kind.retiro": "Retiro en el local",
+  "panel.metodo.precioPorZona": "Precio de la zona",
+  "panel.metodo.gratis": "Gratis",
+  "panel.metodo.zonasTodas": "Todas las zonas activas",
+  "panel.metodo.zonasLista": "Zonas: {lista}",
+  "panel.metodo.pagosLista": "Se paga con: {lista}",
+  "panel.metodo.sinZonaActiva":
+    "Ninguna de sus zonas está activa: hoy este método no le aparece a nadie en el checkout.",
+  "panel.metodo.nombre": "Nombre",
+  "panel.metodo.nombreAyuda":
+    "Lo que lee quien compra: \"Courier AEX\", \"Moto Asunción\", \"Retiro en el local\".",
+  "panel.metodo.tipo": "Tipo",
+  "panel.metodo.tipoAyuda":
+    "Retiro no viaja: no cobra flete ni usa zonas, cualquiera sea lo que pongas abajo.",
+  "panel.metodo.pricing": "Cómo se cobra",
+  "panel.metodo.pricing.zona": "Con el precio de la zona",
+  "panel.metodo.pricing.fijo": "Tarifa plana",
+  "panel.metodo.pricingAyuda":
+    "Por zona conserva el envío gratis desde el umbral de la zona. La tarifa plana cobra lo mismo siempre.",
+  "panel.metodo.precioFijo": "Tarifa plana",
+  "panel.metodo.precioFijoAyuda": "En guaraníes enteros. Sólo se usa con tarifa plana.",
+  "panel.metodo.zonas": "Zonas donde aplica",
+  "panel.metodo.zonasAyuda":
+    "Sin ninguna tildada aplica a todas las zonas activas. Tildá sólo las ciudades a las que este método llega de verdad.",
+  "panel.metodo.pagos": "Medios de pago habilitados",
+  "panel.metodo.pagosAyuda":
+    "Al menos uno. Es lo que decide qué ve quien compra después de elegir esta forma de entrega.",
+  "panel.metodo.descripcion": "Descripción",
+  "panel.metodo.descripcionAyuda": "Una línea para el checkout: \"Llega en 24-48 h a todo el país\".",
+  "panel.metodo.identificador": "Identificador",
+  "panel.metodo.identificadorAyuda":
+    "Interno: no sale en ninguna URL. Sirve para distinguir dos métodos que se llamen parecido.",
 
   "panel.rol.owner": "Dueño",
   "panel.rol.staff": "Encargado",
@@ -1207,6 +1381,8 @@ export const esPY = {
   "panel.actividad.transicion": "{desde} → {hasta}",
   "panel.actividad.deltaStock": "{delta} ({antes} → {despues})",
   "panel.actividad.elSistema": "El sistema",
+  // == O5 ==
+  "panel.actividad.nota": "nota interna",
   "panel.actividad.masNuevos": "← Más nuevos",
   "panel.actividad.masViejos": "Más viejos →",
 
@@ -1239,6 +1415,7 @@ export const esPY = {
   "panel.pedido.descuento": "Descuento",
   "panel.pedido.descuentoCon": "Descuento — {codigo}",
   "panel.pedido.envio": "Envío",
+  "panel.pedido.metodoEnvio": "Forma de entrega",
   "panel.pedido.total": "Total",
   "panel.pedido.ivaIncluido": "IVA incluido en el total",
   "panel.pedido.iva10": "IVA 10%",
@@ -1275,4 +1452,257 @@ export const esPY = {
   // También lo usa `/admin/productos/nuevo`, que lo dibuja arriba del
   // formulario para poder volver sin perder el filtro.
   "panel.productoNuevo.volver": "← Productos",
+
+  // == S10 == Panel de productos y categorías: selección y acciones masivas,
+  // duplicar, markdown seguro, punto de reposición, categorías con foto y
+  // descripción, reembolso parcial (plan-operacion §6.2)
+  // -------------------------------------------------------------------------
+  "panel.productos.seleccionar": "Seleccionar {nombre}",
+  "panel.productos.seleccionarPagina": "Seleccionar toda la página",
+  "panel.productos.seleccionados.uno": "{n} producto seleccionado",
+  "panel.productos.seleccionados.varios": "{n} productos seleccionados",
+  "panel.productos.limpiarSeleccion": "Limpiar selección",
+
+  "panel.masivo.activar": "Activar",
+  "panel.masivo.desactivar": "Desactivar",
+  "panel.masivo.moverCategoria": "Mover de categoría",
+  "panel.masivo.moverConfirmar": "Mover",
+  "panel.masivo.ajustarPrecios": "Ajustar precios",
+  "panel.masivo.aplicando": "Aplicando…",
+  "panel.masivo.cambiaronActivos.uno": "Cambió {n} producto.",
+  "panel.masivo.cambiaronActivos.varios": "Cambiaron {n} productos.",
+  "panel.masivo.movieron.uno": "Se movió {n} producto.",
+  "panel.masivo.movieron.varios": "Se movieron {n} productos.",
+  "panel.masivo.elegiCategoria": "Elegí una categoría",
+
+  "panel.masivo.precios.titulo": "Ajustar precios por porcentaje",
+  "panel.masivo.precios.bajada":
+    "Se aplica sobre el precio de cada variante de los productos elegidos. El precio tachado no cambia.",
+  "panel.masivo.precios.porcentaje": "Porcentaje (negativo para bajar)",
+  "panel.masivo.precios.redondeo": "Redondear a",
+  "panel.masivo.precios.redondeo100": "₲ 100",
+  "panel.masivo.precios.redondeo1000": "₲ 1.000",
+  "panel.masivo.precios.motivo": "Motivo",
+  "panel.masivo.precios.motivo.placeholder": "Ej: ajuste por inflación de proveedor",
+  "panel.masivo.precios.verVistaPrevia": "Ver vista previa",
+  "panel.masivo.precios.calculando": "Calculando…",
+  "panel.masivo.precios.vistaPrevia": "Vista previa ({miradas} variantes, {cambiadas} cambian)",
+  "panel.masivo.precios.ejemploLinea": "Variante #{variantId}: {desde} → {hasta}",
+  "panel.masivo.precios.sinCambios": "Con este porcentaje y redondeo ningún precio cambia.",
+  "panel.masivo.precios.confirmarTitulo": "¿Confirmás el ajuste?",
+  "panel.masivo.precios.confirmarBajada":
+    "Vas a cambiar el precio de {cambiadas} variante(s) un {porcentaje}%, redondeado a {redondeo}. Motivo: “{motivo}”. Esto no se puede deshacer con un botón.",
+  "panel.masivo.precios.confirmarBoton": "Sí, ajustar precios",
+  "panel.masivo.precios.aplicado.uno": "Se ajustó el precio de {n} variante.",
+  "panel.masivo.precios.aplicado.varios": "Se ajustó el precio de {n} variantes.",
+  "panel.masivo.precios.diferencia": "Diferencia total: {monto}",
+
+  "panel.producto.duplicar": "Duplicar producto",
+  "panel.producto.duplicando": "Duplicando…",
+  "panel.producto.duplicado": "Se creó la copia, sin publicar.",
+
+  "panel.variante.puntoReposicion": "Punto de reposición",
+  "panel.variante.puntoReposicion.ayuda":
+    "Debajo de este stock, la variante aparece como \"stock bajo\" en el resumen diario. Vacío = el umbral general de la tienda.",
+  "panel.variante.puntoReposicion.placeholder": "Umbral general",
+
+  "panel.markdown.editar": "Escribir",
+  "panel.markdown.vistaPrevia": "Vista previa",
+  "panel.markdown.ayuda": "**negrita**, *cursiva*, listas con \"- \" y links [texto](https://…).",
+  "panel.markdown.vacio": "Sin descripción todavía.",
+
+  "panel.categoria.descripcion": "Descripción",
+  "panel.categoria.descripcion.placeholder": "Texto para la página de la categoría (opcional).",
+  "panel.categoria.foto": "Foto de portada",
+  "panel.categoria.foto.alt": "Descripción de la foto (alt)",
+
+  "panel.reembolso.titulo": "Reembolso parcial",
+  "panel.reembolso.pagado": "Pagado",
+  "panel.reembolso.devuelto": "Ya devuelto",
+  "panel.reembolso.resta": "Queda por devolver",
+  "panel.reembolso.monto": "Monto a devolver",
+  "panel.reembolso.motivo": "Motivo",
+  "panel.reembolso.motivo.placeholder": "Ej: la compradora devolvió una de las tres unidades",
+  "panel.reembolso.confirmar": "Registrar devolución",
+  "panel.reembolso.cancelar": "Cancelar",
+  "panel.reembolso.abrir": "Reembolso parcial…",
+  "panel.reembolso.hecho": "Devolución registrada.",
+  "panel.reembolso.completo": "Con esto el pago queda devuelto por completo.",
+  "panel.reembolso.excede": "El monto no puede superar lo que queda por devolver.",
+
+  // ===========================================================================
+  // == S9 — panel de pedidos: tracking, notas, remito imprimible (§6.1) ==
+  // ===========================================================================
+  "panel.pedido.imprimirRemito": "Imprimir remito",
+  "panel.pedido.tracking.titulo": "Seguimiento",
+  "panel.pedido.tracking.courier": "Transporte",
+  "panel.pedido.tracking.guia": "Guía",
+  "panel.pedido.tracking.link": "Link",
+  "panel.pedido.notas": "Notas internas",
+
+  "panel.acciones.tracking.titulo": "Seguimiento del envío (opcional)",
+  "panel.acciones.tracking.courier": "Transporte",
+  "panel.acciones.tracking.courier.placeholder": "Moto propia, OCA, correo…",
+  "panel.acciones.tracking.guia": "Número de guía",
+  "panel.acciones.tracking.guia.placeholder": "Ej.: 123456789",
+  "panel.acciones.tracking.link": "Link de seguimiento",
+  "panel.acciones.tracking.link.placeholder": "https://…",
+  "panel.acciones.tracking.opcional":
+    "Los tres campos son opcionales. Lo que cargues acá lo ve la compradora en la página de su pedido.",
+
+  "panel.notas.sinNotas": "Todavía no hay notas en este pedido.",
+  "panel.notas.placeholder": "Llamó, pasa a retirar el jueves…",
+  "panel.notas.contador": "{n}/{maximo}",
+  "panel.notas.agregar": "Agregar nota",
+  "panel.notas.guardando": "Guardando…",
+  "panel.notas.guardada": "Nota guardada.",
+
+  "panel.remito.meta": "Remito",
+  "panel.remito.imprimir": "Imprimir",
+  "panel.remito.volver": "← Volver al pedido",
+  "panel.remito.titulo": "Remito",
+  "panel.remito.numeroPedido": "N.º de pedido",
+  "panel.remito.entrega": "Entrega",
+  "panel.remito.nombre": "Nombre",
+  "panel.remito.telefono": "Teléfono",
+  "panel.remito.direccion": "Dirección",
+  "panel.remito.referencia": "Referencia",
+  "panel.remito.esRegalo": "Es un regalo",
+  "panel.remito.items": "Contenido",
+  "panel.remito.sku": "SKU",
+  "panel.remito.producto": "Producto",
+  "panel.remito.cantidad": "Cant.",
+  "panel.remito.total": "Total",
+  "panel.remito.totalPedido": "Total: {total}",
+
+  "pedido.tracking.titulo": "Seguimiento del envío",
+  "pedido.tracking.courierYguia": "{courier} · Guía {guia}",
+  "pedido.tracking.soloCourier": "{courier}",
+  "pedido.tracking.soloGuia": "Guía {guia}",
+  "pedido.tracking.verEnvio": "Seguí tu envío →",
+
+  // -------------------------------------------------------------------------
+  // == S11 == Vidriera: destacados, vistos recientemente, avisame, consulta
+  // por WhatsApp por variante (plan-operacion §6.3)
+  // -------------------------------------------------------------------------
+  // Fallback de la home sin destacados elegidos a mano — misma lista de
+  // productos que "home.destacados", pero el título dice lo que es: lo más
+  // nuevo, no una selección del comercio.
+  "home.novedades": "Novedades",
+
+  "producto.vistosRecientemente": "Vistos recientemente",
+
+  "stock.avisame.titulo": "Avisame cuando haya stock",
+  "stock.avisame.label": "Tu WhatsApp",
+  "stock.avisame.boton": "Avisame",
+  "stock.avisame.enviando": "Enviando…",
+  "stock.avisame.listo": "Listo, te avisamos por WhatsApp apenas vuelva el stock.",
+
+  // El texto que arma `variant-inquiry-link.tsx`. La URL, cuando hay
+  // `NEXT_PUBLIC_SITE_URL`, se agrega aparte con un separador " — " en vez de
+  // ir adentro de la clave: así una tienda que no configuró esa variable
+  // manda el mismo mensaje sin un hueco vacío al final.
+  "producto.consultaVariante":
+    'Hola, quiero consultar por "{producto}" ({variante}, SKU {sku})',
+  "producto.consultarWhatsApp": "Consultar por WhatsApp",
+
+  // -------------------------------------------------------------------------
+  // == O14 == Deuda de dominio: destacados, foto de categoría, slug largo,
+  // planilla dañada (fable/plan-crecimiento.md §5.1)
+  // -------------------------------------------------------------------------
+  "adminForm.slugLargo": "El slug no puede pasar los 160 caracteres.",
+
+  // -------------------------------------------------------------------------
+  // == O15 == Recordatorio de pago antes del vencimiento
+  // (fable/plan-crecimiento.md §5.2)
+  // -------------------------------------------------------------------------
+  // Sin datos de otras personas y sin datos bancarios: número de pedido, total,
+  // hasta cuándo, y el link tokenizado donde están las instrucciones de pago
+  // que la tienda ya sabe dar.
+  "wa.cliente.recordatorio":
+    "Hola {nombre}! Tu pedido {numero} ({total}) todavía está esperando el pago.",
+  "wa.cliente.recordatorio.limite": "Podés pagarlo hasta las {limite}.",
+  "wa.cliente.recordatorio.pagar": "Pagá o mirá cómo acá: {url}",
+
+  // -------------------------------------------------------------------------
+  // == O16 == Editar un pedido antes del pago (fable/plan-crecimiento.md §5.3)
+  // -------------------------------------------------------------------------
+  // Los lee el staff en el panel, no la compradora: dicen qué se puede hacer
+  // en vez de "no se pudo".
+  "error.edicion.noExiste": "Ese pedido ya no existe.",
+  "error.edicion.estado": "Sólo se puede editar un pedido que todavía está esperando el pago.",
+  "error.edicion.tarjeta":
+    "Un pedido con tarjeta no se edita: el monto ya está comprometido en Pagopar. Cancelalo y que lo haga de nuevo.",
+  "error.edicion.yaPagado": "Este pedido ya tiene el pago acreditado: no se edita.",
+  "error.edicion.motivo": "Escribí por qué lo estás editando: queda en la historia del pedido.",
+  "error.edicion.sinLineas": "Ese pedido no tiene líneas para editar.",
+  "error.edicion.cantidad": "La cantidad tiene que ser un número entero de 0 para arriba.",
+  "error.edicion.lineaAjena": "Esa línea no es de este pedido.",
+  "error.edicion.cantidadSube":
+    "Acá las cantidades sólo bajan. Para agregar productos hace falta un pedido nuevo.",
+  "error.edicion.quedaVacio":
+    "El pedido no puede quedar sin nada. Si ya no quiere nada, cancelalo.",
+  "error.edicion.envio":
+    "Esa forma de entrega no sirve para esta ciudad. Elegí otra antes de guardar.",
+  "error.edicion.envioPago":
+    "Esa forma de entrega no acepta el medio de pago de este pedido.",
+
+  // El mensaje que el staff le manda a la compradora después de editar. Lo
+  // manda una persona por el `wa.me` de siempre: una edición se acordó por
+  // WhatsApp hace un minuto y el que sigue no lo escribe el servidor.
+  "wa.edicion.total": "Listo, tu pedido {numero} quedó en {total}.",
+  "wa.edicion.cuponQuitado":
+    "Con las cantidades nuevas el cupón ya no llegaba al mínimo, así que quedó sin descuento.",
+  "wa.edicion.limite": "Podés pagarlo hasta las {limite}.",
+  "wa.edicion.link": "Mirá el detalle acá: {url}",
+
+  // -------------------------------------------------------------------------
+  // == S17 == Panel y vidriera: dibujar lo que O14–O16 dejaron
+  // (fable/plan-crecimiento.md §6.1)
+  // -------------------------------------------------------------------------
+
+  // Destacados (A): O14 dejó `isFeatured` en `saveProduct`/`listAdminProducts`.
+  "panel.producto.destacado": "Destacado en la home",
+  "panel.producto.destacadoAyuda":
+    "Aparece en la fila de destacados de la portada, antes que el resto del catálogo.",
+  "panel.productos.destacadoChip": "Destacado",
+  "panel.filtros.destacados": "Sólo destacados",
+
+  // Foto de categoría (B): antes era un ID de Cloudinary pegado a mano.
+  "panel.categoria.foto.vacia": "Todavía no tiene foto.",
+  "panel.categoria.foto.subida": "Foto actualizada.",
+
+  // Editar un pedido antes del pago (D): O16 dejó el dominio y la acción.
+  "panel.pedido.editar.titulo": "Editar pedido",
+  "panel.pedido.editar.abrir": "Editar pedido",
+  "panel.pedido.editar.motivoTarjeta":
+    "Con tarjeta no se edita: el monto ya está comprometido en Pagopar. Cancelalo y que la compradora lo haga de nuevo.",
+  "panel.pedido.editar.motivoPagado": "Este pedido ya tiene el pago acreditado: no se edita.",
+  "panel.pedido.editar.motivoEstado": "Sólo se puede editar un pedido que todavía está esperando el pago.",
+  "panel.pedido.editar.items": "Cantidades",
+  "panel.pedido.editar.quitar": "Quitar",
+  "panel.pedido.editar.ciudad": "Ciudad",
+  "panel.pedido.editar.direccion": "Dirección",
+  "panel.pedido.editar.referencia": "Referencia",
+  "panel.pedido.editar.envio": "Forma de entrega",
+  "panel.pedido.editar.sinEnvios": "No hay una forma de entrega que acepte el medio de pago de este pedido.",
+  "panel.pedido.editar.motivo": "Motivo de la edición",
+  "panel.pedido.editar.motivo.placeholder": "Ej: la compradora pidió bajar una unidad",
+  "panel.pedido.editar.motivoCorto": "Contá en pocas palabras por qué lo estás editando.",
+  "panel.pedido.editar.guardar": "Guardar cambios",
+  "panel.pedido.editar.guardado": "Pedido editado.",
+  "panel.pedido.editar.resumen": "Total: {antes} → {despues}",
+  "panel.pedido.editar.cuponQuitado":
+    "Con las cantidades nuevas el cupón {codigo} ya no llegaba al mínimo, así que quedó sin descuento.",
+  "panel.pedido.editar.avisar": "Avisar por WhatsApp",
+
+  // Timeline (E): la línea del recordatorio de pago (O15) en la ficha.
+  "panel.pedido.recordatorioEnviado": "Recordatorio de pago enviado el {fecha}",
+
+  // `src/app/admin/error.tsx` (F): el mismo boundary genérico no distinguía
+  // un error de checkout de un error del panel.
+  "admin.error.titulo": "Algo falló en el panel",
+  "admin.error.texto":
+    "No se pudo cargar esta pantalla. Podés reintentar o volver al inicio del panel — el pedido o el producto no se tocaron.",
+  "admin.error.volver": "Volver a /admin",
 } as const satisfies Record<string, string>;

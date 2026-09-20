@@ -8,7 +8,9 @@ import { saveProduct } from "@/app/actions/admin-products";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MarkdownEditor } from "@/components/admin/markdown-editor";
 import { slugify } from "@/lib/slug";
+import { TESTIDS } from "@/lib/testids";
 import { t } from "@/i18n";
 
 export type ProductFormValues = {
@@ -21,6 +23,8 @@ export type ProductFormValues = {
   ivaRate: number;
   isActive: boolean;
   published: boolean;
+  // == S17 == Destacado en la home (O14 dejó `isFeatured` en `saveProduct`).
+  isFeatured: boolean;
 };
 
 export function ProductForm({
@@ -57,6 +61,7 @@ export function ProductForm({
             ivaRate: Number(data.get("ivaRate")),
             isActive: data.get("isActive") === "on",
             published: data.get("published") === "on",
+            isFeatured: data.get("isFeatured") === "on",
           });
 
           if (!result.ok) {
@@ -88,6 +93,7 @@ export function ProductForm({
           id="name"
           name="name"
           required
+          data-testid={TESTIDS.adminProductNameInput}
           defaultValue={defaults.name}
           onChange={(event) => {
             if (!slugTouched) setSlug(slugify(event.target.value));
@@ -109,16 +115,17 @@ export function ProductForm({
         />
       </div>
 
-      <div className="grid gap-1.5">
-        <Label htmlFor="description">{t("panel.producto.descripcion")}</Label>
-        <textarea
-          id="description"
-          name="description"
-          rows={4}
-          defaultValue={defaults.description}
-          className="border-input bg-background rounded-md border px-3 py-2 text-sm"
-        />
-      </div>
+      {/* Markdown seguro (O7 §5.3 D): el `<textarea name="description">` de
+          adentro es exactamente el mismo campo que leía `saveProduct` antes
+          de este PR, así que el submit no cambió — sólo se le sumó la
+          pestaña de vista previa, renderizada en el cliente con la misma
+          función que va a usar la ficha pública del producto. */}
+      <MarkdownEditor
+        name="description"
+        label={t("panel.producto.descripcion")}
+        defaultValue={defaults.description}
+        rows={4}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-1.5">
@@ -171,9 +178,22 @@ export function ProductForm({
           {t("panel.producto.publicado")}
         </label>
         <p className="text-muted-foreground text-xs">{t("panel.producto.publicadoAyuda")}</p>
+
+        {/* == S17 == `isFeatured` ya lo acepta `saveProduct` (O14); esto es
+            sólo el checkbox que faltaba para prenderlo desde el panel. */}
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="isFeatured"
+            data-testid={TESTIDS.adminProductFeaturedToggle}
+            defaultChecked={defaults.isFeatured}
+          />
+          {t("panel.producto.destacado")}
+        </label>
+        <p className="text-muted-foreground text-xs">{t("panel.producto.destacadoAyuda")}</p>
       </div>
 
-      <Button type="submit" disabled={isPending}>
+      <Button type="submit" data-testid={TESTIDS.adminProductSaveSubmit} disabled={isPending}>
         {isPending ? t("panel.acciones.guardando") : t("panel.producto.guardar")}
       </Button>
     </form>

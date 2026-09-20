@@ -6,9 +6,11 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { markPaymentRefunded, retryPaymentRevival } from "@/app/actions/admin-payments";
+import { RefundForm } from "@/components/admin/refund-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatGs } from "@/lib/money";
+import { TESTIDS } from "@/lib/testids";
 import { t } from "@/i18n";
 
 /**
@@ -31,6 +33,8 @@ export type UnmatchedPaymentCard = {
   provider: string;
   amountPyg: number;
   paidAt: string;
+  // == S17 == `findUnmatchedPayments` (O14) ya trae el reembolso real.
+  refundedPyg: number;
 };
 
 /**
@@ -69,6 +73,10 @@ function UnmatchedPaymentRow({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [refunding, setRefunding] = useState(false);
+  // Reembolso parcial (O7/S10, plan-operacion §6.2): un formulario aparte,
+  // que la propia S10 crea (`refund-form.tsx`) — no toca el flujo de arriba,
+  // que sigue siendo la devolución total de siempre.
+  const [refundingParcial, setRefundingParcial] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -134,6 +142,30 @@ function UnmatchedPaymentRow({
         </p>
       ) : null}
 
+      {refundingParcial && puedeDevolver ? (
+        <div className="mt-2">
+          <RefundForm
+            paymentId={payment.paymentId}
+            orderNumber={payment.orderNumber}
+            amountPyg={payment.amountPyg}
+            // == S17 == Real desde `findUnmatchedPayments` (O14 agregó
+            // `refunded_pyg` a la consulta); antes esto era 0 siempre.
+            refundedPygInicial={payment.refundedPyg}
+            onDone={() => router.refresh()}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            disabled={isPending}
+            onClick={() => setRefundingParcial(false)}
+          >
+            {t("panel.reembolso.cancelar")}
+          </Button>
+        </div>
+      ) : null}
+
       {refunding && puedeDevolver ? (
         <div className="border-border mt-2 grid gap-2 rounded-lg border p-3">
           <label className="text-muted-foreground text-xs" htmlFor={`motivo-${payment.paymentId}`}>
@@ -178,6 +210,18 @@ function UnmatchedPaymentRow({
               onClick={() => setRefunding(true)}
             >
               {t("panel.pagos.marcarDevuelto")}
+            </Button>
+          ) : null}
+          {puedeDevolver ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              data-testid={TESTIDS.adminRefundOpen}
+              disabled={isPending}
+              onClick={() => setRefundingParcial(true)}
+            >
+              {t("panel.reembolso.abrir")}
             </Button>
           ) : null}
         </div>

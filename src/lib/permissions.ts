@@ -22,12 +22,34 @@ export const CAPABILITIES = [
   "pedidos.despachar",
   /** Dar por cobrado, cancelar, vencer, rechazar. Mueve plata o suelta stock. */
   "pedidos.cobrar",
+  /**
+   * Editar un pedido que todavía no se pagó (O16): bajar cantidades, quitar
+   * una línea, corregir la dirección. No es `pedidos.despachar` sino plata: la
+   * pantalla muestra totales, descuento y envío —que el vendedor no ve— y
+   * además los cambia.
+   */
+  "pedidos.editar",
+  /**
+   * Escribir notas internas en un pedido (O5). Los tres roles: es mostrador
+   * puro —"llamó, pasa el jueves"— y quien atiende el teléfono es
+   * justamente el vendedor. No mueve plata, no mueve stock, no cambia el
+   * estado, y la compradora no la ve nunca.
+   */
+  "pedidos.notas",
   /** Ver y decidir comprobantes de transferencia. */
   "comprobantes",
   /** Ver montos: totales, desglose de IVA, precios del catálogo. */
   "precios",
   /** ABM de productos y variantes. */
   "productos",
+  /**
+   * Cambiar precios **en masa** por porcentaje (O7). Owner, y no `productos`,
+   * por lo mismo que los reembolsos: el error no se ve y no se puede deshacer
+   * con un botón. Un +10 % de más se descubre cuando ya se vendió a ese
+   * precio. Las acciones masivas que no tocan plata —activar, mover de
+   * categoría, duplicar— siguen bajo `productos`.
+   */
+  "precios.masivo",
   /** Ajustar `on_hand` a mano. */
   "stock",
   /** El listado de compradores con lo que gastó cada uno. */
@@ -85,6 +107,8 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
     "pedidos.ver",
     "pedidos.despachar",
     "pedidos.cobrar",
+    "pedidos.editar",
+    "pedidos.notas",
     "comprobantes",
     "precios",
     "productos",
@@ -98,7 +122,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
 
   // El mostrador y nada más: ve los pedidos y los despacha. Sin montos, sin
   // comprobantes, sin stock, sin el resumen de ventas.
-  vendedor: ["pedidos.ver", "pedidos.despachar"],
+  vendedor: ["pedidos.ver", "pedidos.despachar", "pedidos.notas"],
 };
 
 export function can(role: UserRole, capability: Capability): boolean {

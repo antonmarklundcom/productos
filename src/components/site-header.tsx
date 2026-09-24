@@ -7,6 +7,7 @@ import { TIENDA } from "@/config/tienda";
 import { CartButton } from "@/components/cart-button";
 import { CuentaHeaderEntry } from "@/components/cuenta/header-entry";
 import { SearchBox } from "@/components/search-box";
+import { WishlistHeaderLink } from "@/components/wishlist-header-link";
 import { getCategories } from "@/db/queries";
 import { t } from "@/i18n";
 import { categoryPlaceholderSrc } from "@/lib/images";
@@ -50,6 +51,7 @@ export async function SiteHeader() {
           <Suspense fallback={null}>
             <CuentaHeaderEntry />
           </Suspense>
+          <WishlistHeaderLink />
           <CartButton />
         </div>
       </div>

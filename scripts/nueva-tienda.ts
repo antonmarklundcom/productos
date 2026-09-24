@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
@@ -10,6 +10,7 @@ import { stdin, stdout } from 'node:process';
 // importarlo daría `nombre` ya resuelto, y este script necesita distinguir
 // "sigue siendo la constante del template" de "la tienda se llama así".
 import { MARCA_PLACEHOLDER } from '../src/config/tienda';
+import { BASELINE_FILE, SOLO_TEMPLATE } from './template-shared';
 
 /**
  * `pnpm nueva-tienda` — de "Use this template" a una tienda que corre.
@@ -62,7 +63,7 @@ export type DatosTienda = {
  * que existir para cada uno — `temas.test.ts` es quien lo verifica, no este
  * script.
  */
-export const TEMAS = ['neutro', 'calido', 'oscuro-vivo'] as const;
+export const TEMAS = ['neutro', 'calido', 'oscuro-vivo', 'productos'] as const;
 export type Tema = (typeof TEMAS)[number];
 
 /** ¿`valor` es uno de los temas conocidos? Sirve de type guard para `--tema`. */
@@ -655,6 +656,10 @@ async function main(): Promise<void> {
   console.log(
     `  ${GLOBALS_FILE}: ${temaCambia ? `tema → ${crudos.tema}` : `sin cambios (tema ${crudos.tema})`}`,
   );
+  const aBorrar = soloTemplateABorrar(datos.nombre, existsSync);
+  if (aBorrar.length > 0) {
+    console.log(`  ${aBorrar.join(', ')}: se borra (es del template, no de la tienda)`);
+  }
 
   if (dryRun) {
     console.log('\n  --dry-run: no se escribió nada.\n');
@@ -668,6 +673,7 @@ async function main(): Promise<void> {
   }
   writeFileSync(ENV_FILE, env.contenido);
   if (temaCambia) writeFileSync(GLOBALS_FILE, globalsNuevo);
+  for (const ruta of aBorrar) rmSync(ruta, { recursive: true, force: true });
 
   imprimirHPanel(env.contenido, aEscribir);
   marcarBaseline();
@@ -681,6 +687,19 @@ async function main(): Promise<void> {
       '    docker compose up -d && pnpm db:push && pnpm db:seed && pnpm create-owner\n' +
       '    pnpm preflight\n',
   );
+}
+
+/**
+ * Lo de `SOLO_TEMPLATE` (`fable/`, Dependabot) que hay que borrar al volver
+ * esto una tienda: los planes del template leídos por una IA en la tienda
+ * parecen tareas pendientes, y Dependabot abriría PRs (y minutos de CI) que
+ * ya llegan por template:sync. Sólo cuando la tienda tiene nombre propio: con
+ * el nombre del template sigue siendo el template, y ahí no se borra nada.
+ */
+export function soloTemplateABorrar(nombre: string, existe: (ruta: string) => boolean): string[] {
+  const limpio = nombre.trim();
+  if (limpio === '' || limpio === MARCA_PLACEHOLDER) return [];
+  return SOLO_TEMPLATE.map((entrada) => entrada.replace(/\/$/, '')).filter(existe);
 }
 
 /** El valor de una clave en un `.env`, o `''`. */
@@ -721,17 +740,27 @@ function imprimirHPanel(contenidoEnv: string, claves: ValoresEnv): void {
  * y ahí no hay nada que marcar.
  */
 function marcarBaseline(): void {
+  // Idempotente de verdad: volver a correr el wizard no puede mover un
+  // baseline que ya existe. Adelantarlo a la punta del template da por
+  // traídos arreglos que la tienda nunca recibió, y ninguno llega después.
+  if (existsSync(BASELINE_FILE)) {
+    console.log(`  ${BASELINE_FILE} ya existe — no se toca.`);
+    return;
+  }
   try {
-    execFileSync('pnpm', ['template:diff', '--marcar'], {
+    // `--origen`: el commit del template del que salió la tienda (mismo árbol
+    // que su primer commit), no la punta de hoy.
+    execFileSync('pnpm', ['template:diff', '--marcar', '--origen'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',
     });
-    console.log('  .template-baseline escrito — commitealo junto con el resto.');
+    console.log(`  ${BASELINE_FILE} escrito — commitealo junto con el resto.`);
   } catch {
     console.log(
-      '  (no pude marcar el baseline del template: falta el remoto `template`.\n' +
-        '   Agregalo y corré `pnpm template:diff --marcar` — sin eso, los commits\n' +
-        '   del template te van a aparecer todos, para siempre.)',
+      '  (no pude marcar el baseline del template: falta el remoto `template`, o\n' +
+        '   el primer commit de este repo no salió del template. Agregá el remoto y\n' +
+        '   corré `pnpm template:diff --marcar --origen`; si no encuentra el commit,\n' +
+        `   escribí a mano en ${BASELINE_FILE} el SHA del template del que salió.)`,
     );
   }
 }

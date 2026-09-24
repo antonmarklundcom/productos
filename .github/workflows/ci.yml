@@ -1,17 +1,55 @@
 name: CI
 
+# Minutos de Actions (NEW-STORE.md § "CI y minutos de Actions"). Este archivo
+# viaja a TODAS las tiendas, y el costo depende de si el repo es público o
+# privado: en un repo **público** los runners estándar de GitHub son gratis y
+# sin límite; en uno **privado** cada minuto se descuenta de la cuenta. Por eso
+# cada job mira `github.event.repository.private`:
+#
+#   - Público: todo corre en cada PR y en cada push a main (e2e incluido;
+#     lighthouse en cada push a main). No cuesta nada y es la red que ataja lo
+#     que un PR de piel rompe en checkout.
+#   - Privado: sólo PRs (el push a main no corre: ya corrió en su PR), `checks`
+#     siempre, `e2e` sólo con el label `ci-completo`, a mano, o en un PR de
+#     distribución del template (rama `template/…`); `lighthouse` sólo a mano.
+#   - En los dos: un PR que sólo toca docs no corre nada (`paths-ignore`), y
+#     un push nuevo cancela la corrida anterior (`concurrency`). Poner el label
+#     `ci-completo` dispara la corrida sola (`labeled`); cualquier otro label no.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+    paths-ignore:
+      - "**.md"
+      - "fable/**"
+      - "LICENSE"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "fable/**"
+      - "LICENSE"
+  workflow_dispatch:
+
+# Un label que no es `ci-completo` va a su propio grupo: si compartiera el
+# del PR, cancelaría la corrida de verdad (`opened`) y quedaría sólo su job
+# salteado. Pasa siempre con Dependabot, que etiqueta el PR apenas lo abre.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'ci-completo' && format('-label-{0}', github.event.label.name) || '' }}
+  cancel-in-progress: true
 
 jobs:
   checks:
+    # Un push a main en un repo privado no corre (ya corrió en su PR), y un
+    # label que no es `ci-completo` no dispara nada. Un job salteado no cuesta
+    # minutos.
+    if: >-
+      (github.event_name != 'push' || !github.event.repository.private) &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ci-completo')
     runs-on: ubuntu-latest
     # Un paso que se cuelga no puede comerse el runner (ni los logs, que
     # recién quedan disponibles cuando el job termina).
-    timeout-minutes: 20
+    timeout-minutes: 15
 
     # Los tests de dominio (transitionOrder, reservas, contador de pedidos)
     # corren contra MySQL de verdad: FOR UPDATE y las transacciones no se
@@ -44,18 +82,25 @@ jobs:
       NEXT_PUBLIC_SITE_URL: https://ci.example.py
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Sin `version:` a propósito: sale de "packageManager" en package.json,
       # y declarar las dos hace fallar la action.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      # MySQL con una hora que no es UTC, como un servidor con `time_zone =
+      # SYSTEM` (Hostinger). El pool fija cada sesión en UTC (src/db/index.ts);
+      # si eso se rompe, los tests de reservas de stock fallan acá y no en
+      # producción.
+      - name: MySQL fuera de UTC
+        run: mysql -h 127.0.0.1 -uroot -proot -e "SET GLOBAL time_zone = '-03:00'"
 
       # `POST /api/setup/init` deploya **migraciones**, no `schema.ts`: en el
       # servidor no hay drizzle-kit y `db:push` no corre. O sea que una columna
@@ -93,8 +138,16 @@ jobs:
   # compradora en un navegador, no lo que asume un test unitario. Corre
   # después de `checks` — sin typecheck/lint/unitarios verdes no vale la pena
   # pagar el minuto extra de un navegador.
+  #
+  # Es el job más caro (navegador + build + base sembrada): en un repo privado
+  # no corre en cada PR, ver el comentario de arriba de todo para cómo pedirlo.
   e2e:
     needs: checks
+    if: >-
+      !github.event.repository.private ||
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'ci-completo') ||
+      startsWith(github.head_ref, 'template/')
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -128,11 +181,11 @@ jobs:
       OWNER_NAME: "Dueño CI"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -161,7 +214,7 @@ jobs:
       # video de los tests que fallaron) sigue subiendo sólo en fallo: es
       # pesado y sólo hace falta para debuguear.
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: capturas
           path: playwright-report/capturas/
@@ -169,7 +222,7 @@ jobs:
           if-no-files-found: ignore
 
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: playwright-report/
@@ -183,8 +236,13 @@ jobs:
   # presupuesto de JS de `tests/e2e/presupuesto.spec.ts` (arriba, en `e2e`),
   # medido con bytes reales, no con un puntaje que cambia con la carga del
   # runner. Este job es sólo una alarma temprana.
+  # En un repo público corre en cada push a main (gratis); en uno privado,
+  # sólo a mano: es una alarma sin poder de bloqueo y no vale los minutos.
   lighthouse:
     needs: e2e
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && !github.event.repository.private)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     continue-on-error: true
@@ -216,11 +274,11 @@ jobs:
       OWNER_NAME: "Dueño CI"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm

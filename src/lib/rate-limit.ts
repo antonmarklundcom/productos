@@ -7,7 +7,12 @@
  * aislado justamente para que ese cambio sea de un archivo.
  */
 
-type Bucket = { hits: number[] };
+/**
+ * La ventana va con la clave: la limpieza de abajo recorre **todas** las
+ * claves, y con la ventana de quien la disparaba (una búsqueda de 60 s)
+ * borraba los intentos de login de los últimos 15 minutos.
+ */
+type Bucket = { hits: number[]; windowMs: number };
 
 const buckets = new Map<string, Bucket>();
 
@@ -27,14 +32,14 @@ export function rateLimit(
   options: { limit: number; windowMs: number },
   now: number = Date.now()
 ): RateLimitResult {
-  sweep(now, options.windowMs);
+  sweep(now);
 
-  const bucket = buckets.get(key) ?? { hits: [] };
+  const bucket = buckets.get(key) ?? { hits: [], windowMs: options.windowMs };
   const windowStart = now - options.windowMs;
   const hits = bucket.hits.filter((time) => time > windowStart);
 
   if (hits.length >= options.limit) {
-    buckets.set(key, { hits });
+    buckets.set(key, { hits, windowMs: options.windowMs });
     const oldest = hits[0] ?? now;
     return {
       ok: false,
@@ -44,17 +49,17 @@ export function rateLimit(
   }
 
   hits.push(now);
-  buckets.set(key, { hits });
+  buckets.set(key, { hits, windowMs: options.windowMs });
   return { ok: true, remaining: options.limit - hits.length, retryAfterSeconds: 0 };
 }
 
-function sweep(now: number, windowMs: number): void {
+function sweep(now: number): void {
   if (now - lastSweep < SWEEP_INTERVAL_MS) return;
   lastSweep = now;
   for (const [key, bucket] of buckets) {
-    const alive = bucket.hits.filter((time) => time > now - windowMs);
+    const alive = bucket.hits.filter((time) => time > now - bucket.windowMs);
     if (alive.length === 0) buckets.delete(key);
-    else buckets.set(key, { hits: alive });
+    else buckets.set(key, { hits: alive, windowMs: bucket.windowMs });
   }
 }
 
@@ -226,3 +231,13 @@ export const STOCK_ALERT_IP_LIMIT = 5;
 export const STOCK_ALERT_IP_WINDOW_MS = 15 * 60 * 1000;
 export const STOCK_ALERT_PHONE_LIMIT = 3;
 export const STOCK_ALERT_PHONE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Reseñas desde la página del pedido. La puerta de verdad es el token del
+ * link y el pedido entregado —sin eso no se escribe nada—, así que esto no es
+ * contra spam anónimo sino contra un script con un link válido martillando la
+ * acción. Diez por IP cada 15 minutos cubre de sobra un pedido grande
+ * calificado producto por producto.
+ */
+export const REVIEW_IP_LIMIT = 10;
+export const REVIEW_IP_WINDOW_MS = 15 * 60 * 1000;

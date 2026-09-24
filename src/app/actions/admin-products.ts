@@ -12,6 +12,14 @@ import {
   updateProduct,
 } from "@/domain/admin-products";
 import {
+  applyCatalogFotos,
+  buildCatalogImportPlan,
+  ensureCatalogCategories,
+  type CatalogFotoFallida,
+  type CatalogImportPlan,
+} from "@/domain/catalog-import-plan";
+import { type CatalogoProducto } from "@/domain/catalog-import";
+import {
   BULK_MAX_IDS,
   BULK_MIN_REASON,
   PERCENT_MAX,
@@ -22,8 +30,11 @@ import {
   duplicateProduct,
   previewPriceAdjustment,
 } from "@/domain/admin-bulk";
+import { sweepBackInStock } from "@/domain/stock-alerts";
 import { validateProductImage } from "@/domain/product-images";
 import { CLOUDINARY_PRODUCTS_FOLDER, cloudinary } from "@/lib/cloudinary";
+import { slugify } from "@/lib/slug";
+import { spreadsheetToCsvText, UnsupportedSpreadsheetError } from "@/lib/spreadsheet";
 import {
   actorLabel,
   adminActionError,
@@ -36,6 +47,10 @@ import { t } from "@/i18n";
 function revalidarVidriera() {
   revalidatePath("/", "layout");
 }
+
+// Import directo del script de seed: mismo `upsertCatalogProducts` que usa
+// `pnpm importar:productos`, no una reimplementación para el panel.
+import { upsertCatalogProducts, type CatalogProductUpsert } from "../../../scripts/seed";
 
 /**
  * Alta y edición del catálogo (PLAN.md 4.6).
@@ -265,6 +280,170 @@ export async function removeProductImage(input: unknown): Promise<AdminActionRes
     return { ok: true };
   } catch (error) {
     return adminActionError("removeProductImage", error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Carga masiva por planilla (CSV/Excel) — `pnpm importar:productos` desde el
+// panel.
+//
+// Dos acciones, no una: `previewCatalogImport` es el ensayo (cuenta y muestra
+// errores, no escribe nada — el default de la CLI sin `--aplicar`) y
+// `applyCatalogImport` recién escribe cuando el dueño confirma. El checkbox
+// "pisar stock" es el equivalente de `--pisar-stock`: apagado por defecto,
+// porque pisar en silencio el stock real de una variante que ya existe es
+// justo el tipo de sorpresa que una planilla de semanas no debería poder dar.
+// ---------------------------------------------------------------------------
+
+const MAX_CATALOG_FILE_BYTES = 10 * 1024 * 1024;
+
+export type CatalogImportSummary = {
+  productosNuevos: number;
+  productosActualizar: number;
+  variantesNuevas: number;
+  variantesActualizar: number;
+  categoriasNuevas: string[];
+  pisaStock: boolean;
+  fotosNuevas: number;
+};
+
+export type CatalogImportPreviewResult =
+  | ({ ok: true } & CatalogImportSummary)
+  | { ok: false; errores: string[] };
+
+async function readCatalogFile(
+  formData: FormData,
+): Promise<{ ok: true; csvText: string } | { ok: false; errores: string[] }> {
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, errores: [t("adminError.elegiArchivo")] };
+  }
+  if (file.size > MAX_CATALOG_FILE_BYTES) {
+    return { ok: false, errores: [t("adminError.archivoGrande")] };
+  }
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  try {
+    return { ok: true, csvText: await spreadsheetToCsvText(file.name, bytes) };
+  } catch (error) {
+    if (error instanceof UnsupportedSpreadsheetError) {
+      return { ok: false, errores: [error.message] };
+    }
+    throw error;
+  }
+}
+
+function planSummary(plan: CatalogImportPlan, pisaStock: boolean): CatalogImportSummary {
+  return {
+    productosNuevos: plan.productosNuevos,
+    productosActualizar: plan.productosActualizar,
+    variantesNuevas: plan.variantesNuevas,
+    variantesActualizar: plan.variantesActualizar,
+    categoriasNuevas: plan.categoriasNuevas,
+    pisaStock,
+    fotosNuevas: plan.fotosNuevas,
+  };
+}
+
+/**
+ * Ensayo: cuenta y muestra, no escribe nada. Es lo que se ve antes de
+ * habilitar el botón de confirmar.
+ */
+export async function previewCatalogImport(formData: FormData): Promise<CatalogImportPreviewResult> {
+  try {
+    await requireStaffSession();
+
+    const leido = await readCatalogFile(formData);
+    if (!leido.ok) return { ok: false, errores: leido.errores };
+
+    const pisaStock = formData.get("pisarStock") === "true";
+    const plan = await buildCatalogImportPlan(leido.csvText);
+    if (plan.errores.length > 0) return { ok: false, errores: plan.errores };
+
+    return { ok: true, ...planSummary(plan, pisaStock) };
+  } catch (error) {
+    const result = adminActionError("previewCatalogImport", error);
+    return { ok: false, errores: [result.error] };
+  }
+}
+
+export type CatalogImportApplyResult =
+  | ({ ok: true } & CatalogImportSummary & {
+        variantesEscritas: number;
+        fotosSubidas: number;
+        fotosOmitidas: number;
+        fotosFallidas: CatalogFotoFallida[];
+      })
+  | { ok: false; errores: string[] };
+
+/**
+ * Escribe. Vuelve a parsear y a chequear conflictos de SKU contra la base
+ * **en este momento** — no reutiliza el plan del ensayo — porque entre la
+ * vista previa y la confirmación pudo haber pasado cualquier cosa (otra
+ * persona cargando productos, por ejemplo) y aplicar un plan viejo sería
+ * escribir sobre un estado que ya no es el real.
+ */
+export async function applyCatalogImport(formData: FormData): Promise<CatalogImportApplyResult> {
+  try {
+    await requireStaffSession();
+
+    const leido = await readCatalogFile(formData);
+    if (!leido.ok) return { ok: false, errores: leido.errores };
+
+    const pisaStock = formData.get("pisarStock") === "true";
+    const plan = await buildCatalogImportPlan(leido.csvText);
+    if (plan.errores.length > 0) return { ok: false, errores: plan.errores };
+
+    const categoriaPorSlug = await ensureCatalogCategories(plan);
+
+    const items: CatalogProductUpsert[] = plan.productos.map((producto: CatalogoProducto) => {
+      const categoryId = categoriaPorSlug.get(slugify(producto.categoryName));
+      if (!categoryId) throw new Error(`Categoría sin id: ${producto.categoryName}`);
+      return {
+        slug: producto.slug,
+        name: producto.name,
+        description: producto.description,
+        categoryId,
+        brand: producto.brand,
+        ivaRate: producto.ivaRate,
+        variants: producto.variants,
+      };
+    });
+
+    const variantesEscritas = await upsertCatalogProducts(items, { resetStock: pisaStock });
+
+    // "Avisame cuando haya stock" (O6): una importación con `pisarStock` es la
+    // otra forma en que `on_hand` sube sin pasar por `adjustStock`. Se dispara
+    // el barrido —que ya sabe qué variantes tienen suscripciones pendientes y
+    // disponibilidad— y no un aviso por variante: la planilla puede traer
+    // doscientas filas y sólo un puñado interesa a alguien.
+    //
+    // Después del commit, sin `await` que demore y sin poder fallar: quien
+    // acaba de importar el catálogo no espera por Meta.
+    if (pisaStock) {
+      void sweepBackInStock().catch((error) => {
+        console.error("sweepBackInStock rechazó", error);
+      });
+    }
+
+    // Las fotos van después del commit del catálogo: una que falla (URL
+    // caída, Cloudinary con hipo) no puede tumbar productos y precios que ya
+    // se guardaron. Se juntan los fallos en `fotosFallidas` en vez de tirar.
+    const fotos = await applyCatalogFotos(plan.productos);
+
+    revalidatePath("/admin/productos");
+    if (fotos.fotosSubidas > 0) revalidarVidriera();
+    return {
+      ok: true,
+      ...planSummary(plan, pisaStock),
+      variantesEscritas,
+      fotosSubidas: fotos.fotosSubidas,
+      fotosOmitidas: fotos.fotosOmitidas,
+      fotosFallidas: fotos.fotosFallidas,
+    };
+  } catch (error) {
+    const result = adminActionError("applyCatalogImport", error);
+    return { ok: false, errores: [result.error] };
   }
 }
 

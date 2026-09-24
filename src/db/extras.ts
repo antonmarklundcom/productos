@@ -15,6 +15,9 @@ export const STOCK_ADJUSTMENTS_ACTOR_FK = 'stock_adjustments_actor_fk';
 export const ORDER_NOTES_ACTOR_FK = 'order_notes_actor_fk';
 export const REFUNDS_ACTOR_FK = 'refunds_actor_fk';
 export const PRICE_ADJUSTMENTS_ACTOR_FK = 'price_adjustments_actor_fk';
+export const PRODUCT_REVIEWS_MODERATOR_FK = 'product_reviews_moderator_fk';
+export const ORDER_RETURNS_ACTOR_FK = 'order_returns_actor_fk';
+export const STORE_SETTINGS_UPDATED_BY_FK = 'store_settings_updated_by_fk';
 
 export async function applySchemaExtras(pool: Pool): Promise<string[]> {
   const applied: string[] = [];
@@ -136,6 +139,8 @@ export async function applySchemaExtras(pool: Pool): Promise<string[]> {
     [ORDER_NOTES_ACTOR_FK, 'order_notes'],
     [REFUNDS_ACTOR_FK, 'refunds'],
     [PRICE_ADJUSTMENTS_ACTOR_FK, 'price_adjustments'],
+    // Devoluciones de mercadería: append-only como `refunds`, misma regla.
+    [ORDER_RETURNS_ACTOR_FK, 'order_returns'],
   ] as const) {
     const [rows] = await pool.query<never>(
       `SELECT COUNT(*) AS n FROM information_schema.table_constraints
@@ -149,6 +154,36 @@ export async function applySchemaExtras(pool: Pool): Promise<string[]> {
       );
       applied.push(`FK ${table}.actor_user_id → users.id`);
     }
+  }
+
+  // Quién moderó una reseña. Misma regla que las auditorías de arriba: la
+  // persona se puede borrar, la moderación que hizo queda (con la FK en NULL).
+  const [reviewsModeratorFk] = await pool.query<never>(
+    `SELECT COUNT(*) AS n FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'product_reviews' AND constraint_name = ?`,
+    [PRODUCT_REVIEWS_MODERATOR_FK],
+  );
+  if (count(reviewsModeratorFk) === 0) {
+    await pool.query(
+      `ALTER TABLE \`product_reviews\` ADD CONSTRAINT \`${PRODUCT_REVIEWS_MODERATOR_FK}\` ` +
+        'FOREIGN KEY (`moderated_by_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE',
+    );
+    applied.push('FK product_reviews.moderated_by_user_id → users.id');
+  }
+
+  // Quién guardó los ajustes de la tienda. Misma regla: borrar a la persona
+  // no puede borrar los ajustes, sólo deja la FK en NULL.
+  const [storeSettingsFk] = await pool.query<never>(
+    `SELECT COUNT(*) AS n FROM information_schema.table_constraints
+      WHERE table_schema = DATABASE() AND table_name = 'store_settings' AND constraint_name = ?`,
+    [STORE_SETTINGS_UPDATED_BY_FK],
+  );
+  if (count(storeSettingsFk) === 0) {
+    await pool.query(
+      `ALTER TABLE \`store_settings\` ADD CONSTRAINT \`${STORE_SETTINGS_UPDATED_BY_FK}\` ` +
+        'FOREIGN KEY (`updated_by_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE',
+    );
+    applied.push('FK store_settings.updated_by_user_id → users.id');
   }
 
   await pool.query(

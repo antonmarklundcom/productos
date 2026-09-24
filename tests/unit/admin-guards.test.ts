@@ -131,6 +131,8 @@ const GUARD_ESPERADO: Readonly<Record<string, 'Admin' | 'Staff' | 'Owner'>> = {
   adjustVariantStock: 'Staff',
   uploadProductImage: 'Staff',
   removeProductImage: 'Staff',
+  previewCatalogImport: 'Staff',
+  applyCatalogImport: 'Staff',
 
   // Un CSV es la base del comercio en un archivo que sale del edificio.
   exportOrdersCsv: 'Owner',
@@ -194,6 +196,14 @@ const GUARD_ESPERADO: Readonly<Record<string, 'Admin' | 'Staff' | 'Owner'>> = {
   subirQrBancario: 'Owner',
   quitarQrBancario: 'Owner',
 
+  // Ajustes de la tienda: el WhatsApp al que escriben las compradoras, la
+  // portada y lo que la tienda promete en sus políticas. Quien los cambia
+  // puede mandar a las clientas a otro número; no se delega, como el banco.
+  guardarAjustes: 'Owner',
+  restaurarAjustes: 'Owner',
+  subirImagenPortada: 'Owner',
+  quitarImagenPortada: 'Owner',
+
   // El flete es plata que entra en cada pedido, y el error se cobra en
   // silencio: no rompe nada, no deja log, y se descubre al cerrar el mes.
   crearZonaEnvio: 'Owner',
@@ -208,6 +218,15 @@ const GUARD_ESPERADO: Readonly<Record<string, 'Admin' | 'Staff' | 'Owner'>> = {
   editarMetodoEnvio: 'Owner',
   cambiarEstadoMetodoEnvio: 'Owner',
   moverMetodoEnvio: 'Owner',
+
+  // Reseñas: moderar y responder es vidriera, los mismos roles que
+  // `productos`. Crear o editar una reseña no es una acción de nadie.
+  moderarResena: 'Staff',
+  responderResena: 'Staff',
+
+  // Devoluciones de mercadería: mueven stock, no plata. Mismos roles que el
+  // ajuste de stock; el reembolso sigue siendo `markPaymentRefunded` (Owner).
+  registrarDevolucion: 'Staff',
 };
 
 describe('cada acción llama al guard que le corresponde', () => {

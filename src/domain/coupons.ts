@@ -199,6 +199,7 @@ async function countCustomerUses(
   tx: Executor,
   couponId: number,
   input: { customerId?: number | null; customerPhone?: string | null },
+  options: { locking?: boolean } = {},
 ): Promise<number> {
   const who = input.customerId
     ? eq(orders.customerId, input.customerId)
@@ -208,10 +209,22 @@ async function countCustomerUses(
 
   if (!who) return 0;
 
-  const rows = await tx
+  const query = tx
     .select({ n: count() })
     .from(orders)
     .where(and(eq(orders.couponId, couponId), who));
+
+  // Con el candado del cupón tomado, una lectura común sigue viendo la foto
+  // que la transacción sacó **antes** de esperarlo (REPEATABLE READ): no ve
+  // el pedido que el checkout de al lado acaba de commitear, y el mismo
+  // WhatsApp se lleva el descuento dos veces. Una lectura con candado lee lo
+  // último commiteado — el mismo truco que `heldQtyForUpdate` en stock.ts.
+  //
+  // `FOR UPDATE` y no `FOR SHARE`: MariaDB (la base de Hostinger) no conoce
+  // `FOR SHARE` y la consulta entera falla, o sea el checkout con un cupón
+  // con tope por cliente. Para leer lo último commiteado alcanza cualquiera de
+  // los dos, y el candado del cupón ya serializa a los que compiten.
+  const rows = options.locking ? await query.for('update') : await query;
 
   return Number(rows[0]?.n ?? 0);
 }
@@ -267,7 +280,7 @@ export async function lockCouponForUse(
   }
 
   if (row.maxUsesPerCustomer !== null) {
-    const used = await countCustomerUses(tx, couponId, input);
+    const used = await countCustomerUses(tx, couponId, input, { locking: true });
     if (used >= row.maxUsesPerCustomer) throw new CouponRaceError('agotado_para_vos');
   }
 

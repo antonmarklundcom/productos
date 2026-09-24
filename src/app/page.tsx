@@ -7,8 +7,13 @@ import { HomeHero } from "@/components/home-hero";
 import { ProductCard } from "@/components/product-card";
 import { TIENDA, type Hero } from "@/config/tienda";
 import { getCatalog, getCategories, type CatalogProduct } from "@/db/queries";
+import { getStoreSettings } from "@/domain/store-settings";
+import { heroEfectivo } from "@/domain/store-settings-schema";
 import { t } from "@/i18n";
+import { contactoPublico } from "@/lib/comercio";
 import { categoryPlaceholderSrc } from "@/lib/images";
+import { jsonLdScript, organizationJsonLd } from "@/lib/seo";
+import { siteOrigin } from "@/lib/site-url";
 
 /**
  * Home. ISR: el catálogo cambia poco y las redes móviles paraguayas
@@ -40,8 +45,29 @@ export default async function HomePage() {
     error = cause instanceof Error ? cause.message : String(cause);
   }
 
+  // Los ajustes del panel (`/admin/ajustes`) pisan campo por campo la portada
+  // de `TIENDA.hero` (o la del template); `null` = el dueño la apagó.
+  const [ajustes, contacto] = await Promise.all([getStoreSettings(), contactoPublico()]);
+  const hero = heroEfectivo(ajustes.marca, TIENDA.hero ?? heroPorDefecto(categories[0]?.slug));
+
+  // Quién es la tienda, para Google. Sin dominio configurado no sale (ver
+  // `organizationJsonLd`).
+  const organizacion = organizationJsonLd({
+    origin: siteOrigin(),
+    name: TIENDA.nombre,
+    telephone: contacto.whatsapp,
+    email: contacto.email,
+    sameAs: contacto.redes.map((red) => red.url),
+  });
+
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8">
+      {organizacion ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: jsonLdScript(organizacion) }}
+        />
+      ) : null}
       {/*
         La portada. Sin `TIENDA.hero` configurado sale la de siempre, con el
         texto del template: una tienda recién clonada no tiene foto de
@@ -52,7 +78,13 @@ export default async function HomePage() {
         que se sabe seguro que existe; sin categorías todavía, no se dibuja un
         botón que lleve a un 404.
       */}
-      <HomeHero hero={TIENDA.hero ?? heroPorDefecto(categories[0]?.slug)} />
+      {hero ? (
+        <HomeHero hero={hero} />
+      ) : (
+        // Sin portada, el `<h1>` de la página sigue existiendo para lectores de
+        // pantalla y buscadores.
+        <h1 className="sr-only">{ajustes.marca.seoTitulo ?? TIENDA.titulo}</h1>
+      )}
 
       {/* Franja de confianza: en una tienda general, sin un rubro que hable
           por sí solo, esto es lo que reemplaza al "ya sé qué venden acá" de
@@ -111,7 +143,12 @@ export default async function HomePage() {
               </div>
               <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
                 {featured.map((product, index) => (
-                  <ProductCard key={product.id} product={product} priority={index < 4} />
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    priority={index < 4}
+                    showRating={ajustes.vidriera.estrellasEnTarjetas}
+                  />
                 ))}
               </div>
             </section>

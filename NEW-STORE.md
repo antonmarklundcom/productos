@@ -7,31 +7,73 @@ el original. No copies carpetas a mano y no hagas fork.
 La idea del template: **la maquinaria ya está hecha y no se toca**. Por tienda
 sólo hay cuatro trabajos — marca, diseño, base de datos, productos.
 
+## En una página
+
+1. GitHub → **Use this template** → repo **privado** nuevo para la tienda.
+2. `git clone` · `pnpm install` · `git remote add template https://github.com/antonmarklundcom/ecom.git`
+3. `pnpm setup:doctor` → `pnpm nueva-tienda` (marca, WhatsApp **real**, dominio,
+   tema; borra `fable/`, Dependabot y `tiendas.json`, que son del template) → commit + push.
+4. En el repo nuevo: crear el label `ci-completo` (Issues → Labels) para pedir
+   el e2e cuando haga falta. Ver § "CI y minutos de Actions".
+5. Base, catálogo y dueño (§4) · diseño (§5) · cuentas de terceros (tabla de
+   abajo) · deploy (DEPLOY.md).
+6. `pnpm preflight` en verde → recién ahí se cobra (§6).
+7. En el template: agregar la tienda a `tiendas.json` (con dominio y dónde está
+   hosteada) para que le lleguen las versiones nuevas.
+
 ---
 
-**Corré todo esto en tu máquina, en una terminal — no en un contenedor
-remoto.** Los pasos de la base de datos necesitan Docker Desktop corriendo de
-verdad; un contenedor de Claude Code en la nube no tiene daemon de Docker y
-esos pasos van a fallar.
+**Los pasos de la base de datos corrélos en tu máquina, en una terminal.**
+`docker compose up -d`, `db:push`, `db:seed` y `create-owner` necesitan Docker
+Desktop corriendo de verdad, y un contenedor de Claude Code en la nube no tiene
+daemon de Docker.
+
+Todo lo demás —el bootstrap, `pnpm nueva-tienda`, el rediseño, el catálogo—
+anda igual desde una sesión en la nube, que en la práctica es de donde salieron
+las primeras tiendas. `pnpm setup:doctor` reconoce solo ese entorno y degrada el
+control de Docker a advertencia en vez de bloquearte; si no lo detecta, forzalo
+con `pnpm setup:doctor --skip-docker`. Lo que queda pendiente en ese caso son
+los cuatro comandos de arriba, en una máquina con Docker, antes de que la tienda
+pueda levantar.
 
 ## El camino corto
 
 ```bash
 git clone <tu-repo> && cd <tu-repo> && pnpm install
-git remote add template git@github.com:antonmarklundcom/ecom.git
+git remote add template https://github.com/antonmarklundcom/ecom.git
 pnpm setup:doctor              # ¿Node, pnpm, Docker y los remotos están listos?
 pnpm nueva-tienda        # seis preguntas: marca, WhatsApp, dominio
 docker compose up -d && pnpm db:push && pnpm db:seed && pnpm create-owner
 pnpm preflight
 ```
 
+Eso es si el repo salió de "Use this template" y está vacío. **Si el repo de la
+tienda ya existe y ya tiene algo adentro**, el primer paso es otro:
+`pnpm bootstrap:repo` — ver §1b.
+
 `pnpm setup:doctor` revisa la máquina, no la tienda: versión de Node contra
 `.nvmrc`, versión de pnpm contra `packageManager`, si el daemon de Docker
-responde, y si los remotos `origin` y `template` son alcanzables (esto último
-agarra el caso de una SSH key de GitHub que todavía no está cargada). Corré
-esto **antes** de `pnpm nueva-tienda`: los tres problemas que más tiempo
-hacen perder — Docker Desktop cerrado, SSH sin configurar, Node viejo — se
-ven todos juntos acá en vez de descubrirse uno por uno a mitad del wizard.
+responde, si los remotos `origin` y `template` son alcanzables (esto último
+agarra el caso de una SSH key de GitHub que todavía no está cargada) y si `main`
+se quedó atrás de trabajo que vive sin mergear en otras ramas. Corré esto
+**antes** de `pnpm nueva-tienda`: los tres problemas que más tiempo hacen
+perder — Docker Desktop cerrado, SSH sin configurar, Node viejo — se ven todos
+juntos acá en vez de descubrirse uno por uno a mitad del wizard.
+
+```bash
+pnpm setup:doctor                 # todo
+pnpm setup:doctor --skip-docker   # sé que acá no hay Docker; no me bloquees por eso
+```
+
+**El aviso de "main se quedó atrás"** sale de una tienda real: `main` tenía un
+ajuste de CI y nada más, mientras meses de trabajo ya mergeado en PRs —marca,
+catálogo, rediseño de la home, preparación del deploy— vivían en ramas que
+nadie bajó. Nada lo avisaba; se descubrió a mano con `git log` cuando ya
+molestaba, y para entonces media sesión se había ido en rehacer cosas que ya
+estaban hechas. El doctor mira ahora las ramas locales y las de `origin`, y
+avisa si hay dos o más sin mergear cuya punta es más nueva que la de `main` por
+más de dos semanas (o una sola con más de mes y medio). Es sólo una advertencia
+y nunca bloquea: una rama en vuelo es normal y no tiene que hacer ruido.
 
 Eso es todo lo que se puede automatizar. **Lo único que queda a mano es lo de
 terceros**, porque son cuentas de otro que nadie puede abrir por vos:
@@ -60,11 +102,13 @@ cuadra, o si querés saber por qué el wizard hace lo que hace.
 3. Agregá el remoto del template **ahora**, no el día que lo necesites:
 
    ```bash
-   git remote add template git@github.com:antonmarklundcom/ecom.git
+   git remote add template https://github.com/antonmarklundcom/ecom.git
    ```
 
-   `pnpm nueva-tienda` (paso 2) corre `template:diff --marcar` solo y deja
-   `.template-baseline` escrito —commitealo—; sin el remoto no puede, te lo
+   `pnpm nueva-tienda` (paso 2) corre `template:diff --marcar --origen` solo y
+   deja `.template-baseline` escrito —commitealo— con el commit del template
+   del que salió la tienda (el que tiene el árbol de su primer commit, no la
+   punta de hoy); si ya existe, no lo toca. Sin el remoto no puede, te lo
    avisa, y el primer `pnpm template:diff` corre en modo degradado con los
    commits del template apareciendo todos, para siempre (ver "Arreglos que
    aparecen después" al final).
@@ -72,6 +116,70 @@ cuadra, o si querés saber por qué el wizard hace lo que hace.
 4. `pnpm setup:doctor` — confirma que Node, pnpm, Docker y los dos remotos están
    listos antes de seguir. Es la máquina, no la tienda; `pnpm preflight`
    (paso 6) es la otra mitad, la de si esta tienda ya puede cobrar.
+
+### 1b. Si el repo ya existe y ya tiene algo adentro
+
+El paso 1 supone el camino de GitHub: repo nuevo, vacío, creado con "Use this
+template". En la práctica pasa seguido lo contrario — las tres primeras tiendas
+(`productos`, `lenceria`, `mascota`) ya tenían repo propio, con historia,
+remoto y contenido, de antes de que este template existiera. Para ésas "Use this
+template" no sirve: crearía un repo distinto y habría que mudar todo.
+
+Para ese caso está `pnpm bootstrap:repo`, que copia el árbol del template
+adentro de un repo que ya existe:
+
+```bash
+# parado en el template
+cd ecom
+pnpm bootstrap:repo --destino ../lenceria --dry-run   # qué haría
+pnpm bootstrap:repo --destino ../lenceria             # hacerlo
+```
+
+**No lo hagas a mano.** Lo que sale natural es `cp -a ecom/. ../lenceria/`, y
+eso copia también el `.git` del template encima del `.git` del destino: al repo
+de la tienda le quedan la historia y el remoto del template. No falla, no avisa;
+se descubre al hacer `git push`. `.git` es la primera línea de la lista de
+exclusiones del script, y hay un test que lo fija.
+
+Lo que hace y lo que no:
+
+- **excluye** `.git`, `node_modules`, `.next`, `out`, `coverage`, `backups/`,
+  `.claude/` y todos los `.env*` menos `.env.example`. Tampoco copia
+  `.template-baseline`: ese archivo dice hasta dónde está al día **esa** tienda
+  (ver el final de este documento), así que lo escribe `pnpm nueva-tienda` en el
+  destino, no el template;
+- **no borra nada.** Lo que ya estaba en el destino y el template no conoce
+  queda donde está, y se lista al final para que lo mires. Típicamente es el
+  sitio viejo: sacalo a mano, o vas a terminar con dos apps mezcladas;
+- **se puede correr de nuevo.** No reescribe un archivo cuyo contenido ya es
+  idéntico, así que la segunda pasada sólo trae lo que cambió — sirve igual para
+  el primer bootstrap que para traer el template al día más adelante;
+- **no usa `rsync`**, que no está instalado en todos lados (entre otros, los
+  contenedores de Claude Code en la nube, que es justo desde donde se
+  bootstrapearon las tres primeras tiendas). Es Node puro;
+- **no toca git en el destino**: no commitea, no pushea, no cambia de rama.
+  Deja todo en el working tree, que es donde lo querés para mirarlo con
+  `git diff` antes de commitear.
+
+Por eso mismo pide que el destino esté limpio (`git status` sin cambios) y se
+niega si no lo está: con el working tree limpio, todo lo que escriba el script
+se deshace con un `git checkout .`. Si sabés lo que estás haciendo, `--forzar`.
+
+Después de la copia, el resto del camino es el mismo:
+
+```bash
+cd ../lenceria
+git status                 # mirá qué entró antes de commitear
+git remote add template https://github.com/antonmarklundcom/ecom.git
+pnpm install
+pnpm setup:doctor          # acá te va a avisar si `main` se quedó atrás
+pnpm nueva-tienda
+```
+
+Ese `pnpm setup:doctor` en un repo que ya tenía vida es el que más paga: es
+exactamente el escenario donde `main` puede estar meses atrás de lo que ya se
+mergeó en PRs, y bootstrapear encima de un `main` viejo es rehacer trabajo ya
+hecho.
 
 ### 2. Marca y secretos — `pnpm nueva-tienda`
 
@@ -88,7 +196,8 @@ del pie, WhatsApp y dominio— y con eso:
   `crypto.randomBytes` (no con `openssl`, que en Windows no existe) y los
   escribe en `.env.local` junto con el WhatsApp y el dominio;
 - imprime el bloque exacto de variables para pegar en el hPanel;
-- corre `pnpm template:diff --marcar`.
+- corre `pnpm template:diff --marcar --origen` si todavía no hay
+  `.template-baseline` (si ya hay, no lo mueve).
 
 **Es idempotente:** correrlo de nuevo ofrece los valores de hoy como default
 —Enter los deja— y **nunca regenera un secreto que ya exista**. Eso último no
@@ -182,12 +291,27 @@ Los productos reales entran por dos caminos:
   Variante vacía significa variante única y Stock vacío significa 0 al crear,
   sin tocarlo al reimportar. El formato es el mismo que baja el export del
   panel (una fila por variante) más columnas opcionales — Descripción, Marca,
-  IVA, Precio antes (₲), Slug. Separador `;` o `,`, como venga. Sin `--aplicar`
-  es un ensayo que sólo cuenta; los errores salen todos juntos con número de
-  línea. Idempotente: re-importar actualiza precios sin duplicar y **no pisa el
-  stock** de variantes existentes (`--pisar-stock` si de verdad querés eso).
-  Las categorías que no existan se crean al final del menú. Las fotos no van
-  por acá: se cargan después en `/admin/productos`.
+  IVA, Precio antes (₲), Slug y **Fotos**. Separador `;` o `,`, como venga. Sin
+  `--aplicar` es un ensayo que sólo cuenta; los errores salen todos juntos con
+  número de línea. Idempotente: re-importar actualiza precios sin duplicar y
+  **no pisa el stock** de variantes existentes (`--pisar-stock` si de verdad
+  querés eso). Las categorías que no existan se crean al final del menú.
+  - **Fotos**: una o más URLs `https://` en la columna Fotos, separadas por
+    `|`, espacio o salto de línea (normalmente sólo en la primera fila de cada
+    producto). Cloudinary va a buscarlas solo — nada se descarga acá — y sólo
+    se suben a un producto que hoy no tiene ninguna foto, para que reimportar
+    la misma planilla no duplique nada. Ejemplo de fila (mismas columnas de
+    siempre + Fotos al final):
+
+    ```
+    SKU;Producto;Categoría;Variante;Precio (₲);Stock;Descripción;Marca;IVA;Precio antes (₲);Slug;Fotos
+    AUR-1;Auriculares TWS;Electrónica;Negro;285000;24;;;;;;https://cdn.tienda.com/aur-1.jpg|https://cdn.tienda.com/aur-1b.jpg
+    ```
+
+    Tanto el panel (`/admin/productos`) como la CLI las suben iguales, con la
+    misma regla; sin credenciales de Cloudinary configuradas se avisa y se
+    sigue el resto de la importación sin ellas. Una foto también se puede
+    cargar suelta, a mano, desde `/admin/productos`.
 
 El seed deja un punto de partida que **se termina de ajustar desde el panel**,
 sin volver a tocar código:
@@ -231,6 +355,39 @@ guarda desde el panel, la fila pisa al entorno para siempre — y ahí conviene
 vaciar las variables, para que no queden dos verdades. `pnpm preflight` avisa
 (sin frenar el deploy) si están vacías, porque desde afuera de la base no puede
 saber si la tabla está cargada; el que sí sabe es el cartel de `/admin`.
+
+### 4a-bis. Ajustes de la tienda: lo que el dueño edita sin llamarte
+
+`/admin/ajustes` (sólo el dueño) junta lo que antes era un cambio en
+`src/config/tienda.ts` o una variable de entorno más un redeploy. Todo campo
+vacío significa **"el de siempre"** —el de `tienda.ts` o el del entorno— y la
+pantalla muestra cuál es; "Restaurar valores por defecto" vuelve cada sección a
+eso. Se guarda en una sola fila JSON (`store_settings`): un ajuste nuevo del
+template no trae migración, y una fila vieja o rota se lee con los defaults.
+
+| Se edita en `/admin/ajustes` | Sigue en el código / el entorno |
+|---|---|
+| Bajada del pie, título y descripción de la home para Google | El **nombre** (`TIENDA.nombre`): también es el `<title>` de cada página y lo verifica `pnpm preflight` |
+| Portada: prendida/apagada, título, texto, botón, foto (se sube a Cloudinary, carpeta `portadas/`) | Una portada distinta (carrusel, vídeo): se escribe en `src/app/page.tsx` |
+| Barra de anuncio arriba de todo | Idioma, `ogLocale`, cuentas de cliente (`tienda.ts`) |
+| WhatsApp **público**, email, dirección, horario, Instagram/Facebook/TikTok | `WHATSAPP_NUMBER`: destino de los avisos al dueño (y el público si el panel está vacío) |
+| Envío y devoluciones para el JSON-LD de Google (días, precio desde, política) | Tarifas y zonas de envío (`/admin/envios`) |
+| Páginas `/envios`, `/devoluciones`, `/preguntas-frecuentes`, `/terminos`, `/privacidad`: prendidas, título y texto | Los textos de arranque: `src/config/paginas-default.ts` (piel) |
+| Estrellas en las tarjetas, barra de compra móvil | El diseño de esas piezas (piel) |
+| Recuadro "Comprá tranquilo" del checkout | Los medios de pago que lista: salen solos de los métodos de envío y de Pagopar |
+| Umbral global de stock bajo | El de cada variante (`reorder_point`), que igual gana |
+
+Los textos de las páginas arrancan con un aviso "Texto por defecto — revisalo
+antes de publicar": son genéricos, sin promesas ni números de ley, y **hay que
+leerlos con el dueño antes de lanzar**. Aceptan el markdown chico de las
+descripciones y los `{{tienda}}`, `{{url}}`, `{{whatsapp}}`, `{{email}}`,
+`{{direccion}}`, `{{horario}}`, `{{diasDevolucion}}` y `{{mediosDePago}}`; uno sin
+dato sale como una frase ("a coordinar por WhatsApp"), nunca crudo.
+
+Una tienda que ya rediseñó `site-footer.tsx`, `layout.tsx` o `page.tsx` (piel) y
+trae esto por `template:sync` se queda con los suyos: la barra de anuncio, los
+links a las páginas y el contacto nuevo del pie no aparecen hasta sumarlos a
+mano (las páginas en sí sí existen).
 
 ### 4b. ¿Esta tienda quiere cuentas de cliente?
 
@@ -320,6 +477,7 @@ de siempre: un parámetro en el cuerpo, aprobada por Meta:
 | Pedido registrado (justo después de crearse) | `WHATSAPP_CLOUD_TEMPLATE_CLIENTE_CONFIRMADO` |
 | Pago registrado (transferencia aprobada, Pagopar acreditado o contra entrega confirmada) | `WHATSAPP_CLOUD_TEMPLATE_CLIENTE_PAGADO` |
 | Pedido enviado | `WHATSAPP_CLOUD_TEMPLATE_CLIENTE_ENVIADO` |
+| Pedido entregado: "¿Qué tal tu pedido? Contanos qué te pareció" con el link a su pedido, donde está el formulario de reseña (sólo compras entregadas) | `WHATSAPP_CLOUD_TEMPLATE_CLIENTE_RESENA` |
 
 El destino de los tres es el WhatsApp que dejó cada compradora en su pedido —
 no hace falta ninguna variable de número. Y a diferencia del aviso al
@@ -478,39 +636,203 @@ del template. Lo que sigue es sólo dónde encontrarlo:
 
 ### La distribución automática del template (S13)
 
-Cada push a `main` de `antonmarklundcom/ecom` dispara
-`.github/workflows/distribuir.yml` en el template, que le abre (o actualiza)
-un PR de maquinaria a cada tienda listada en la raíz de `tiendas.json` — el
-mismo `pnpm template:sync` de arriba, corrido por una acción en vez de a mano.
-Es lo que hace que el paso 1 de "Arreglos que aparecen después" deje de ser
-manual.
+Publicar una versión del template (un tag `v*`, ver CHANGELOG.md) —o correrlo
+a mano desde la pestaña Actions— dispara `.github/workflows/distribuir.yml` en
+el template, que le abre (o actualiza) un PR de maquinaria a cada tienda
+listada en la raíz de `tiendas.json` — el mismo `pnpm template:sync` de arriba,
+corrido por una acción en vez de a mano. Es lo que hace que el paso 1 de
+"Arreglos que aparecen después" deje de ser manual. Un push a `main` ya no
+distribuye: cada PR de distribución corre el CI de la tienda (incluido el e2e,
+porque es donde llega maquinaria nueva), así que se agrupan por versión.
+
+El workflow viaja a las tiendas con el resto del repo, pero **sólo corre en el
+repo del template** (`if: github.repository == 'antonmarklundcom/ecom'`): en una
+tienda no levanta ni un runner.
 
 **Para que una tienda reciba estos PRs, alguien con acceso al repo del
 template tiene que:**
 
-1. Agregarla a `tiendas.json` en la raíz del template:
+1. Agregarla a `tiendas.json` en la raíz del template. `repo` es lo único que
+   usa el workflow; `dominio` y `notas` son opcionales y sirven de registro:
 
    ```json
-   [{ "repo": "antonmarklundcom/mi-tienda" }]
+   [
+     {
+       "repo": "antonmarklundcom/mi-tienda",
+       "dominio": "mitienda.com.py",
+       "notas": "cuentas de cliente prendidas; Pagopar en sandbox"
+     }
+   ]
    ```
 
-2. Tener cargado el secret `TIENDAS_TOKEN` en el repo del template: un PAT de
-   GitHub con `contents:write` + `pull-requests:write` sobre esa(s) tienda(s).
-   Sin el secret, el workflow se salta solo y lo dice en el log — no hace
-   nada a medias.
+   Nada de secretos ni de datos de infraestructura acá: el template es
+   público. Ni claves ni `DATABASE_URL`, pero tampoco el nombre de la base o
+   del usuario de Hostinger (`u123_…` es la mitad de un login), ni la cuenta
+   o el slot. Eso va a un lugar privado (el gestor de contraseñas, o un repo
+   privado de notas). `tests/unit/tiendas-json.test.ts` rechaza campos que no
+   sean esos tres. `tiendas.json` es `SOLO_TEMPLATE`: una tienda nueva no
+   hereda la lista.
 
-El PR que abre en la tienda trae **sólo lo que `template:sync` clasifica como
-maquinaria** (los mismos límites de siempre: `fable/` se descarta, el
-lockfile se regenera, los workflows de CI se quedan con la versión del
-template). Si `template:sync` se para en un conflicto real, el PR igual se
-abre —**en draft**—, con lo que sí entró limpio más el commit, el archivo y
-los pasos para terminarlo a mano en el cuerpo. El CI de cada tienda decide si
-se mergea; nadie mergea por ella. Los commits de piel (S9, S10, S11 de este
-mismo plan, o cualquier rediseño) **no viajan por acá** — siguen siendo
-`git cherry-pick` a mano si la tienda no rediseñó esa pantalla, tal como
-describe § "Migraciones que llegan por `template:sync`" más abajo.
+2. Tener cargado el secret `TIENDAS_TOKEN` en el repo del template: un token
+   **fine-grained** de GitHub (Settings → Developer settings → Fine-grained
+   tokens) con acceso a cada tienda y estos permisos de repositorio en
+   **Read and write**: **Contents**, **Pull requests** y **Workflows**
+   (Workflows porque la maquinaria incluye `.github/workflows/*`: sin ese
+   permiso GitHub rechaza el push). Issues en Read and write es opcional:
+   deja que el workflow cree el label `ci-completo` en la tienda. Un token
+   fine-grained lista los repos uno por uno —**cada tienda nueva hay que
+   sumarla al token**— y vence: cuando vence, el paso "Clonar la tienda"
+   falla y lo dice. Sin el secret, el workflow se salta solo y lo dice en el
+   log — no hace nada a medias.
+
+3. Que la tienda tenga `.template-baseline` (el commit del template desde el
+   que se creó o hasta el que se sincronizó). Sin él, la distribución a esa
+   tienda falla con "No hay .template-baseline": correr una vez
+   `pnpm template:diff --marcar` en la tienda sobre un commit conocido.
+
+El PR que abre en la tienda es exactamente `pnpm template:sync` (ver
+"Arreglos que aparecen después"), corrido desde el template: archivo por
+archivo, con la piel de la tienda intacta y la lista de qué se trajo, qué se
+fusionó, qué cambio de la tienda pisó el template y qué quedó sin tocar en el
+cuerpo del PR. Siempre la misma rama, `template/sync`: una versión nueva
+actualiza el PR abierto en vez de abrir otro, y si alguien ya empujó
+commits a mano a esa rama (resolviendo un conflicto), el workflow no la pisa
+y lo avisa. Si quedó un conflicto de verdad, el PR sale **en draft** con los
+marcadores (`<<<<<<<`) commiteados y la lista de archivos: se resuelven en
+esa misma rama. El CI de cada tienda decide si se mergea; nadie mergea por
+ella.
+
+**Ensayo gratis antes de publicar:** `pnpm template:ensayar-distribucion`
+hace lo mismo que el workflow contra cada tienda de `tiendas.json` (clon
+temporal, nada se empuja) y, con `--verificar`, corre `typecheck`, `lint` y
+los unitarios de cada tienda ya sincronizada. 0 minutos de Actions.
+
+### CI y minutos de Actions
+
+`ci.yml` viaja a todas las tiendas y cuesta distinto según el repo: en uno
+**público** los runners estándar de GitHub son gratis y sin límite; en uno
+**privado** cada minuto se descuenta de la cuenta (Linux 1x), y diez tiendas
+privadas corriendo todo en cada push se comían el mes en días. Cada job mira
+si el repo es privado y se adapta solo:
+
+| Qué | Repo público | Repo privado |
+|---|---|---|
+| `checks` (drift de `drizzle/`, typecheck, lint, unitarios + integración con MySQL, build) | cada PR y cada push a `main` | cada PR |
+| `e2e` (Playwright) | cada PR y cada push a `main` | label `ci-completo`, corrida manual (Actions → CI → Run workflow), o un PR de distribución (rama `template/…`) |
+| `lighthouse` | cada push a `main`, o a mano | sólo a mano |
+| `distribuir.yml`, `pnpm-al-dia.yml` | sólo en el repo del template | sólo en el repo del template |
+
+En los dos casos, un PR de sólo docs (`*.md`, `fable/`) no corre nada, y un
+push nuevo al mismo PR cancela la corrida anterior. En un repo privado,
+poner el label `ci-completo` dispara la corrida con e2e al toque (cualquier
+otro label no dispara nada); pedilo siempre que el PR toque checkout,
+`/admin`, o saque/mueva un `data-testid`. El label se crea una vez por repo
+(Issues → Labels → New label, `ci-completo`); en las tiendas lo crea el
+primer PR de distribución.
+
+El gate de cada día es local y gratis: `pre-commit` corre `typecheck` + `lint`
+y `pre-push` corre `pnpm test:unit` (los unitarios, en paralelo, ~15 s; husky,
+se instala con `pnpm install`). `pnpm test` corre todo, integración incluida
+(necesita MySQL: `docker compose up -d`).
+
+**Una vez por cuenta de GitHub, a mano:** Settings → Billing → Spending limit
+en `$0` (al llegar al límite los jobs se frenan, no se cobra), y mirar
+Billing → Actions una vez por mes, que desglosa por repo. En una tienda que no
+va a recibir cambios por un tiempo: Settings → Actions → Disable actions.
+
+Si en tu repo la protección de `main` exige el check `checks`, un PR de sólo
+docs se queda esperándolo (no corre): mergealo como admin, o no marques
+`checks` como obligatorio.
 
 ### 5. Diseño
+
+#### El kit de temas
+
+El template trae **tres temas** listos, cada uno un archivo en
+`src/styles/temas/` con los mismos tokens de shadcn (oklch) en `:root` y en
+`.dark`:
+
+| Tema | Para quién | Fuentes sugeridas | Redondeo |
+|---|---|---|---|
+| `neutro` (default) | el comercio sin identidad de color definida — fotos y logo hacen el trabajo | `Geist` / `Geist Mono` (las de hoy, sin tocar `layout.tsx`) | `0.625rem` |
+| `calido` | rubros cálidos/artesanales: comida, cuero, decoración, "de campo" | `Fraunces` (títulos) + `Figtree` (cuerpo) | `1rem` |
+| `oscuro-vivo` | tech, gaming, indumentaria urbana — fondo oscuro **fijo** (no depende del modo del celular) con acento saturado | `Sora` (títulos) + `Inter` (cuerpo) | `0.25rem` |
+
+`src/app/globals.css` no define los colores: importa uno solo de estos
+archivos (`@import "../styles/temas/neutro.css";`). **Elegir un tema es
+cambiar esa línea**, a mano o con el wizard:
+
+```bash
+pnpm nueva-tienda --tema calido        # sin terminal interactiva (CI, script)
+pnpm nueva-tienda                      # interactivo: pregunta "¿Tema?" con lo que ya hay como default
+```
+
+Sin `--tema` y sin terminal interactiva (el caso de `pnpm bootstrap:repo` o
+un script), el default es el tema que `globals.css` ya tenía importado —
+`neutro` si todavía no importaba ninguno. El wizard es idempotente: pedir el
+mismo tema dos veces no reescribe el archivo.
+
+Cada archivo de tema lleva en su cabecera para quién es, el par de fuentes
+sugerido y las dos líneas exactas de `src/app/layout.tsx` que hay que
+cambiar para usarlas (las fuentes **siguen viviendo ahí**, vía
+`next/font/google` — el tema sólo trae la sugerencia en un comentario, no
+las cablea).
+
+**Crear un cuarto tema:**
+
+1. Copiar `src/styles/temas/neutro.css` a `src/styles/temas/<nombre>.css`.
+2. Cambiar los valores de `:root` y `.dark` — las **mismas** 19 variables
+   (más `--radius`, sólo en `:root`) tienen que estar en los dos bloques;
+   `tests/unit/temas.test.ts` lo verifica leyendo los `.css`, no confía en
+   memoria, así que un tema con una variable de menos hace fallar el test
+   en vez de dejar un botón invisible en producción.
+3. Escribir la cabecera (para quién, fuentes sugeridas, líneas de
+   `layout.tsx`) — el test también la exige.
+4. Agregar `<nombre>` a la lista `TEMAS` de `scripts/nueva-tienda.ts` para
+   que el wizard lo ofrezca. Los dos tests unitarios, `tests/unit/temas.test.ts`
+   y `tests/unit/nueva-tienda.test.ts`, leen `TEMAS` de ese archivo: agregar
+   el nombre ahí mantiene ambos en verde si el CSS cumple los requisitos anteriores.
+5. `pnpm nueva-tienda --tema <nombre>` para probarlo, y `pnpm build` una vez
+   con el `@import` apuntando a ese archivo (después volver a dejar el tema
+   que la tienda usa).
+
+Nada de esto se lee en runtime: es CSS puro y una línea de `@import`. Ningún
+componente importa el nombre del tema ni cambia de comportamiento según
+cuál esté activo.
+
+#### Del mockup al código
+
+El primer paso de un rediseño por tienda es un mockup de Claude Design: se ve
+antes de escribir nada, se corrige barato y evita el rediseño a ciegas. Lo que
+cuesta cada vez es lo de después — traducir ese mockup a archivos. Esta tabla es
+esa traducción, para no volver a deducirla en cada sesión:
+
+| Lo que ves en el mockup | Dónde vive en el código | Nota |
+|---|---|---|
+| Paleta: fondo, texto, color principal, bordes | `src/styles/temas/<tema>.css` → `:root` y `.dark` (`globals.css` sólo importa uno) | Tokens de shadcn en **oklch**. Tres temas listos (§5 "El kit de temas") + `pnpm nueva-tienda --tema`; cambiás las variables, no las clases: todo el sitio las consume vía Tailwind |
+| Modo oscuro | mismo archivo, bloque `.dark` | Si sólo tocás `:root`, la tienda queda linda de día y rota de noche. Cambiá los dos o ninguno |
+| Redondeo de botones, cards, inputs | `--radius` en `src/styles/temas/<tema>.css` | Un solo número por tema; `--radius-sm/md/lg/xl` salen de ahí (`globals.css` los mapea en `@theme inline`) |
+| Tipografía (títulos y cuerpo) | `src/app/layout.tsx` | Fuentes de `next/font/google`. Reemplazá `Geist`/`Geist_Mono` manteniendo las variables `--font-geist-sans` / `--font-geist-mono`, que es lo que `globals.css` mapea en `@theme inline` |
+| Barra de arriba: logo, buscador, carrito, menú de categorías | `src/components/site-header.tsx` | Libre. Lo único que no conviene sacar es `CartButton` |
+| Portada / hero de la home | `hero` en `src/config/tienda.ts`, y si no alcanza `src/components/home-hero.tsx` | Ver abajo: una portada de temporada no necesita tocar código |
+| Resto de la home: grilla de destacados, categorías, secciones nuevas | `src/app/page.tsx` | Es de la tienda entera |
+| Ficha de producto en la grilla | `src/components/product-card.tsx` | El precio "desde" y el badge de stock salen de `price-tag.tsx` y `stock-badge.tsx` |
+| Foto de producto y sus placeholders | `src/components/product-image.tsx`, `public/placeholders/` | Cuatro placeholders dibujados, uno por categoría del seed; cualquier otra categoría cae en `categoria.svg` con su nombre en texto (no en el mismo dibujo de "producto sin foto") |
+| Pie: columnas, contacto, WhatsApp | `src/components/site-footer.tsx` | El nombre y el tagline salen de `TIENDA`, no los escribas a mano |
+| Botón flotante de WhatsApp | `src/components/whatsapp-fab.tsx` | El número sale del entorno (`src/lib/comercio.ts`) |
+| Nombre, título del navegador, tagline, meta description | `src/config/tienda.ts` | **Nunca** en un componente: `tests/unit/marca-centralizada.test.ts` lo bloquea |
+| Imagen que se ve al compartir el link | `src/app/opengraph-image.tsx` | Se dibuja sola con el nombre y el tagline. No hay que subir nada |
+| Favicon | `src/app/favicon.ico` | Ningún control lo verifica; se olvida siempre |
+
+Dos cosas que el mockup va a mostrar y **no** son piel: el checkout
+(`src/components/checkout-form.tsx` es markup con lógica de plata adentro — se
+repinta con cuidado, ver la tabla de abajo) y `/admin`, que se puede repintar
+pero no rediseñar en su lógica.
+
+Orden que funciona: tokens de `globals.css` → tipografía en `layout.tsx` →
+header y footer → home → `product-card`. Los dos primeros pasos ya mueven el
+80% de lo que se ve, y hacerlos antes evita retocar a mano colores que las
+variables iban a resolver solas.
 
 **La portada de la home** se cambia sin tocar código: `hero` en
 [`src/config/tienda.ts`](./src/config/tienda.ts) acepta una foto de Cloudinary,
@@ -518,10 +840,12 @@ un título, una bajada y un botón. Con `hero: null` (el default) sale la portad
 del template. Es lo que le permite al comercio cambiar su banner de temporada
 solo; todo lo demás de la home se rediseña editando `src/app/page.tsx`.
 
-Todo el color y el radio viven en `src/app/globals.css` (`:root` y `.dark`,
-tokens de shadcn en oklch) y se consumen vía Tailwind. Cambiar la paleta =
-editar esas variables, nada más. La tipografía se cambia en
-`src/app/layout.tsx` (fuentes de `next/font/google`).
+Todo el color y el radio viven en `src/styles/temas/<tema>.css` (`:root` y
+`.dark`, tokens de shadcn en oklch; `globals.css` sólo importa el archivo
+activo) y se consumen vía Tailwind. Cambiar la paleta = elegir un tema
+(§5 "El kit de temas") o editar esas variables directamente, nada más. La
+tipografía se cambia en `src/app/layout.tsx` (fuentes de
+`next/font/google`).
 
 Qué se puede redibujar libremente y qué no:
 
@@ -563,77 +887,116 @@ de Hostinger, las trampas del SSH, la base de datos, el cron cada 15 minutos
 contra `/api/cron/vencer-pedidos` y la prueba de humo. Acordate además de
 registrar la URL de respuesta de Pagopar.
 
+### 7. Google Shopping y el catálogo de Meta (después del lanzamiento)
+
+La tienda publica su catálogo en **`https://DOMINIO/feed.xml`** (un ítem por
+variante, con foto, precio, tachado, stock y marca; lo arma
+`src/lib/product-feed.ts`). Se carga **una vez** en cada panel y ellos lo
+vuelven a leer solos:
+
+- **Google Merchant Center** → Productos → Fuentes de datos → Agregar →
+  "Recuperación programada" con esa URL, país Paraguay, idioma español,
+  moneda PYG. Habilita las fichas gratuitas de Google Shopping.
+- **Meta Commerce Manager** → Catálogo → Fuentes de datos → Feed de datos →
+  URL programada, la misma. Habilita los anuncios de catálogo y las etiquetas
+  de compra de Instagram y Facebook.
+
+Sin `NEXT_PUBLIC_SITE_URL` el feed responde 404 (sin dominio no hay links), y
+un producto sin foto no entra (Google lo rechazaría). No hay nada que
+configurar en la tienda.
+
 ---
 
 ## Arreglos que aparecen después — ya tengo una tienda
 
-Los repos creados desde un template **no reciben** los commits posteriores del
-template. Si arreglás un bug de checkout acá, las tiendas ya creadas no se
-enteran.
+Los repos creados desde un template no reciben **solos** los commits
+posteriores del template: les llegan como un PR `template/sync` cada vez que se
+publica una versión, o a mano con `pnpm template:sync`.
 
 `pnpm template:diff` te dice qué le falta a **esta** tienda; `pnpm
-template:sync` lo trae. Los merge commits de PR no se listan ni se traen: viajan sus commits individuales. El flujo completo:
+template:sync` lo trae. Lo normal es no correrlo a mano: cada versión del
+template le abre un PR a cada tienda (ver § "La distribución automática del
+template"). A mano, el flujo completo es:
 
 ```bash
-git remote add template git@github.com:antonmarklundcom/ecom.git   # una vez
+git remote add template https://github.com/antonmarklundcom/ecom.git   # una vez
 git checkout -b poner-al-dia-template   # nunca sobre main
-pnpm template:sync                      # trae la maquinaria, commit por commit
-pnpm template:diff                      # ¿queda algo marcado con ~? revisalo a mano
+pnpm template:sync                      # trae la maquinaria, en un commit
 git push -u origin poner-al-dia-template && gh pr create   # o el flujo de PR que uses
 ```
 
-`template:sync` cherry-pickea, del más viejo al más nuevo, **sólo** los
-commits marcados como maquinaria (ver `template:diff` abajo) — nunca toca
-`main` directamente. Resuelve solo los tres conflictos que se repiten en toda
-sincronización real: descarta `fable/` del lado del template (las tiendas no
-tienen el plan de endurecimiento), regenera `pnpm-lock.yaml` con `pnpm install
---lockfile-only` en vez de tocarlo a mano, y en los workflows de
-`.github/workflows/*.yml` se queda con la versión del template. Con cualquier
-otro conflicto —en `src/`, casi siempre porque vos y el template tocaron la
-misma línea— **para en seco**, deja todo lo demás ya aplicado y te dice qué
-commit, qué archivo y cómo seguir (`git cherry-pick --continue` y volver a
-correr `pnpm template:sync`, que retoma solo desde ahí). Al final corre
-`pnpm typecheck && pnpm lint && pnpm test`: si algo falla, los commits quedan
-aplicados pero `.template-baseline` no se mueve, para que puedas arreglar y
-reintentar sin perder lo ya traído.
+`template:sync` trabaja **archivo por archivo**, no commit por commit: para
+cada archivo que el template cambió entre el `.template-baseline` de la
+tienda y la última versión, compara la versión del template en el baseline,
+la de la tienda y la del template ahora, y decide:
+
+| Caso | Qué hace |
+|---|---|
+| La tienda nunca lo tocó (maquinaria o piel) | queda el del template: nuevo, cambiado o borrado |
+| `KNOWN-ISSUES.md`, `ARCH.md`, `NEW-STORE.md`, `CHANGELOG.md` | queda el del template |
+| Maquinaria cambiada de los dos lados | merge de 3 vías; si toca la misma línea, **conflicto** |
+| `package.json` cambiado de los dos lados | merge por clave; si los dos cambiaron la misma (una dependencia), gana el template y se lista |
+| Un test cambiado de los dos lados | gana el del template (va con la maquinaria que prueba) y se lista |
+| Maquinaria que la tienda no tiene y el template cambió | vuelve (la maquinaria no se saca por tienda) |
+| Piel o docs que la tienda cambió o borró (home, `product-card`, `README.md`, `CLAUDE.md`…) | queda lo de la tienda; se lista |
+| Mixtos (`checkout-form.tsx`, `src/app/admin`) que la tienda cambió | queda lo de la tienda; se listan aparte para mirar la lógica nueva a mano |
+| `fable/`, `.github/dependabot.yml`, `tiendas.json` | nunca viajan (y se sacan si una tienda vieja los tiene) |
+| `pnpm-lock.yaml` | el del template si las dependencias quedaron iguales; si no, se regenera |
+
+Maquinaria acá es `src/domain`, `src/lib`, `src/db`, `src/app/api`,
+`src/app/actions`, `scripts`, `drizzle`, `.github/workflows`, `tests`,
+`.husky`, más `package.json`, los configs de la raíz y el diccionario
+`src/i18n/es-PY.ts` (sus textos son tuyos, pero la maquinaria usa sus claves:
+fusionarlo deja tus textos y suma las claves nuevas).
+
+Todo termina en **un** commit con el `.template-baseline` nuevo adentro. Si
+hubo conflictos, no commitea: deja todo lo demás aplicado, los archivos en
+conflicto con los marcadores de siempre y el baseline ya escrito. Resolvés,
+`git add -A`, `git commit`, y listo. Al final corre `pnpm typecheck && pnpm
+lint && pnpm test` (salvo `--sin-tests`): si algo falla, el commit ya está y
+lo arreglás en uno aparte.
 
 ```bash
-pnpm template:sync --dry-run        # qué traería, sin tocar nada
-pnpm template:sync --hasta <sha>    # parar en un commit dado
+pnpm template:sync --dry-run        # qué haría con cada archivo, sin tocar nada
+pnpm template:sync --hasta <sha>    # sincronizar hasta un commit dado del template
 pnpm template:sync --sin-tests      # no correr typecheck/lint/test al final
 ```
 
-Si preferís el camino manual (o `template:sync` te frenó en un conflicto y
-querés ver el resto antes de reintentar), `pnpm template:diff` sigue
-sirviendo solo:
+Hasta v1.0.0 esto era un cherry-pick por commit. Con tiendas reales se
+frenaba en el primer commit que tocaba algo que la tienda había cambiado
+(un `CLAUDE.md` propio, un test adaptado a su piel, un archivo que nunca
+trajo) aunque el resultado final no chocara con nada.
+
+`pnpm template:diff` sigue sirviendo para mirar qué commits del template no
+están acá:
 
 ```bash
 pnpm template:diff              # qué commits del template no están acá
-git cherry-pick <sha> <sha>     # los que quieras traer a mano
 pnpm template:diff --marcar     # "ya me puse al día"
 ```
 
-Marca con `*` los que tocan la maquinaria (`src/domain`, `src/lib`, `src/db`,
-`src/app/api`, `src/app/actions`, `scripts`, `drizzle`, `.github/workflows`):
-ésos los quiere toda tienda, y son los que trae `template:sync`. El resto
-suele ser piel que vos reescribiste, y cherry-pickearlo te pisa el rediseño.
-Con `~` marca `src/components/checkout-form.tsx` y `src/app/admin`: markup
-tuyo con lógica compartida adentro, así que ahí leé el diff en vez de
-cherry-pickear — ni `template:diff` ni `template:sync` lo tocan solos. Las
-*actions* de admin sí van con `*` — ahí está la plata.
+Marca con `*` los que tocan la maquinaria: ésos los quiere toda tienda. Con
+`~` marca `src/components/checkout-form.tsx` y `src/app/admin`: markup tuyo
+con lógica compartida adentro, así que ahí leé el diff. Las *actions* de
+admin sí van con `*` — ahí está la plata.
 
 **Trampa:** un repo hecho con "Use this template" **no comparte historia** con
 el original, así que `git log HEAD..template/main` lista todo y no sirve. Por
 eso ambos comandos se apoyan en un punto de partida guardado en
 `.template-baseline` —commitealo—, que `template:diff --marcar` (o el commit
 final de `template:sync`) es lo que mueve. Si no hay `.template-baseline`
-todavía, corré `pnpm template:diff --marcar` una vez en un commit conocido
-antes de tocar `template:sync`.
+todavía, corré `pnpm template:diff --marcar --origen` (busca el commit del
+template con el árbol del primer commit de la tienda) antes de tocar
+`template:sync`. Un repo que ya existía no tiene ese commit: `pnpm
+bootstrap:repo` escribe el baseline solo (el commit del template que copió);
+si no, escribí el SHA a mano. **No** uses `--marcar` a secas para arrancar: marca
+la punta de hoy y da por traído todo lo que el template arregló desde que la
+tienda salió.
 
 ### Migraciones que llegan por `template:sync`
 
 Una migración del template es **maquinaria**: viaja marcada con `*` y
-`template:sync` la trae sola con el commit que la creó. Después del sync, en
+`template:sync` la trae sola (`drizzle/` entero, con su `_journal.json`). Después del sync, en
 esta tienda hay que aplicarla como cualquier otra —`pnpm db:push` en local,
 `POST /api/setup/init` en el servidor (DEPLOY.md)— y `pnpm db:generate` tiene
 que quedar sin drift.

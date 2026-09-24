@@ -4,19 +4,28 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 
 import { AddToCart } from "@/components/add-to-cart";
+import { FunnelEvent } from "@/components/funnel-event";
 import { ProductDescription } from "@/components/product-description";
 import { ProductImage } from "@/components/product-image";
 import { ProductCard } from "@/components/product-card";
+import { RatingStars, formatRating } from "@/components/rating-stars";
 import { RecentlyViewed } from "@/components/recently-viewed";
+import { StickyBuyBar } from "@/components/sticky-buy-bar";
+import { WishlistButton } from "@/components/wishlist-button";
 import { getProductBySlug, getRelatedProducts } from "@/db/queries";
+import { getProductRatingSummary, listApprovedReviews } from "@/domain/reviews";
 import { stockAlertsEnabled } from "@/domain/stock-alerts";
-import { t } from "@/i18n";
-import { comercioWaLink, comercioWhatsApp } from "@/lib/comercio";
+import { getStoreSettings } from "@/domain/store-settings";
+import { t, tPlural } from "@/i18n";
+import { analyticsActivo } from "@/lib/analytics";
+import { waLinkPublico, whatsappPublico } from "@/lib/comercio";
 import { OG_IMAGE_SIZE, productImageUrl } from "@/lib/images";
 import { markdownToText } from "@/lib/markdown";
 import { formatGs } from "@/lib/money";
-import { jsonLdScript } from "@/lib/seo";
+import { formatDatePY } from "@/lib/py";
+import { jsonLdScript, productJsonLd } from "@/lib/seo";
 import { siteOrigin } from "@/lib/site-url";
+import { TESTIDS } from "@/lib/testids";
 
 /**
  * Ficha de producto.
@@ -28,6 +37,9 @@ import { siteOrigin } from "@/lib/site-url";
 export const dynamic = "force-dynamic";
 
 type Params = Promise<{ slug: string }>;
+
+/** El bloque de agregar al carrito: a donde vuelve la barra de compra móvil. */
+const BLOQUE_COMPRA_ID = "comprar";
 
 /** `cache()` memoiza por request: metadata y página comparten una consulta. */
 const loadProduct = cache(async (slug: string) => getProductBySlug(slug));
@@ -116,38 +128,51 @@ export default async function ProductPage({ params }: { params: Params }) {
     pricePyg: cheapest,
   });
 
-  const waHref = comercioWaLink(t("producto.consultaWhatsApp", { nombre: product.name }));
+  // Reseñas verificadas: sólo las aprobadas (`src/domain/reviews.ts`). Sin
+  // ninguna, no se dibuja nada — ni estrellas vacías ni "sé la primera".
+  const [rating, reviews, ajustes] = await Promise.all([
+    getProductRatingSummary(product.id),
+    listApprovedReviews(product.id),
+    getStoreSettings(),
+  ]);
+
+  // Al WhatsApp **público** (`/admin/ajustes`, o `WHATSAPP_NUMBER`).
+  const waHref = await waLinkPublico(t("producto.consultaWhatsApp", { nombre: product.name }));
 
   // Para el link de consulta por variante (`variant-inquiry-link.tsx`, cliente):
-  // el teléfono sale de una variable sin `NEXT_PUBLIC_`, así que se resuelve
-  // acá, en el servidor, y se pasa ya normalizado — el componente cliente
-  // nunca lee `process.env`.
-  const whatsappPhone = comercioWhatsApp();
+  // el teléfono sale de los ajustes o de una variable sin `NEXT_PUBLIC_`, así
+  // que se resuelve acá, en el servidor, y se pasa ya normalizado — el
+  // componente cliente nunca lee `process.env` ni la base.
+  const whatsappPhone = await whatsappPublico();
   const origin = siteOrigin();
   const productUrl = origin ? `${origin.origin}/producto/${product.slug}` : null;
 
   // JSON-LD: PYG y priceValidUntil no se inventan — se dejan afuera si no
-  // hay dato, que es mejor que un dato falso en el rich result.
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "Product",
+  // hay dato, que es mejor que un dato falso en el rich result. Lo arma
+  // `productJsonLd` (src/lib/seo.ts), que es maquinaria.
+  const jsonLd = productJsonLd({
+    origin,
+    slug: product.slug,
     name: product.name,
     // Mismo motivo que arriba: el JSON-LD que lee Google es texto, no markdown.
-    description: markdownToText(product.description) || undefined,
-    brand: product.brand ? { "@type": "Brand", name: product.brand } : undefined,
-    sku: product.variants[0]?.sku,
-    offers: product.variants.map((variant) => ({
-      "@type": "Offer",
-      sku: variant.sku,
-      name: variant.label,
-      price: variant.pricePyg,
-      priceCurrency: "PYG",
-      availability:
-        variant.available > 0
-          ? "https://schema.org/InStock"
-          : "https://schema.org/OutOfStock",
+    description: markdownToText(product.description),
+    brand: product.brand,
+    images: product.images
+      .slice(0, 5)
+      .map((image) => productImageUrl(image.cloudinaryId, "detail"))
+      .filter((src): src is string => src !== null),
+    variants: product.variants,
+    rating,
+    // Envío y devoluciones para Google, sólo con lo que el dueño cargó.
+    merchant: ajustes.envioDevolucion,
+    reviews: reviews.map((review) => ({
+      author: review.authorName,
+      rating: review.rating,
+      title: review.title,
+      body: review.body,
+      date: review.createdAt,
     })),
-  };
+  });
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8">
@@ -195,13 +220,39 @@ export default async function ProductPage({ params }: { params: Params }) {
         <div>
           <p className="text-muted-foreground text-sm">{product.brand ?? product.categoryName}</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">{product.name}</h1>
+          {rating.count >= 1 ? (
+            <a
+              href="#resenas"
+              data-testid={TESTIDS.productRatingSummary}
+              className="text-muted-foreground hover:text-foreground mt-2 inline-flex items-center gap-2 text-sm"
+            >
+              <RatingStars value={rating.average} />
+              <span>
+                {tPlural("producto.resenas.resumen", rating.count, {
+                  promedio: formatRating(rating.average),
+                })}
+              </span>
+            </a>
+          ) : null}
 
-          <div className="mt-6">
+          {/* `id` para la barra de compra móvil (`StickyBuyBar`), que trae
+              de vuelta hasta acá. */}
+          <div id={BLOQUE_COMPRA_ID} className="mt-6 flex scroll-mt-24 flex-wrap items-start gap-3">
             <AddToCart
               product={product}
               stockAlertsEnabled={stockAlertsEnabled()}
               whatsappPhone={whatsappPhone}
               productUrl={productUrl}
+            />
+            <WishlistButton
+              slug={product.slug}
+              name={product.name}
+              sku={
+                (product.variants.find((variant) => variant.pricePyg === cheapest) ??
+                  product.variants[0])?.sku
+              }
+              pricePyg={cheapest ?? product.variants[0]?.pricePyg}
+              size="inline"
             />
           </div>
 
@@ -242,6 +293,35 @@ export default async function ProductPage({ params }: { params: Params }) {
         </div>
       </div>
 
+      {reviews.length > 0 ? (
+        <section
+          id="resenas"
+          data-testid={TESTIDS.productReviewsSection}
+          className="border-border mt-12 scroll-mt-24 border-t pt-8"
+        >
+          <h2 className="text-lg font-semibold tracking-tight">{t("producto.resenas.titulo")}</h2>
+          <ul className="mt-4 grid gap-6">
+            {reviews.map((review) => (
+              <li key={review.id} className="text-sm">
+                <RatingStars value={review.rating} />
+                {review.title ? <p className="mt-1 font-medium">{review.title}</p> : null}
+                <p className="mt-1 whitespace-pre-line">{review.body}</p>
+                <p className="text-muted-foreground mt-1 text-xs">
+                  {review.authorName} · {formatDatePY(review.createdAt)} ·{" "}
+                  {t("producto.resenas.compraVerificada")}
+                </p>
+                {review.ownerReply ? (
+                  <div className="border-border bg-muted/40 mt-2 rounded-lg border p-3">
+                    <p className="text-xs font-medium">{t("producto.resenas.respuesta")}</p>
+                    <p className="mt-1 whitespace-pre-line">{review.ownerReply}</p>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {related.length > 0 ? (
         <section className="border-border mt-12 border-t pt-8">
           <h2 className="text-lg font-semibold tracking-tight">{t("producto.relacionados")}</h2>
@@ -253,6 +333,14 @@ export default async function ProductPage({ params }: { params: Params }) {
         </section>
       ) : null}
 
+      {ajustes.vidriera.barraCompraMovil && product.variants.length > 0 ? (
+        <StickyBuyBar
+          targetId={BLOQUE_COMPRA_ID}
+          name={product.name}
+          price={cheapest !== undefined ? formatGs(cheapest) : null}
+        />
+      ) : null}
+
       <RecentlyViewed
         current={{
           slug: product.slug,
@@ -262,6 +350,25 @@ export default async function ProductPage({ params }: { params: Params }) {
           imageAlt: product.images[0]?.alt ?? null,
         }}
       />
+
+      {/* "Vio el producto" para GA4/Meta (src/lib/funnel.ts), con el SKU de
+          la variante más barata — el mismo id que el feed. */}
+      {analyticsActivo() && product.variants[0] ? (
+        <FunnelEvent
+          event="view_item"
+          items={[
+            {
+              id: (
+                product.variants.find((variant) => variant.pricePyg === cheapest) ??
+                product.variants[0]
+              ).sku,
+              name: product.name,
+              pricePyg: cheapest ?? product.variants[0].pricePyg,
+              qty: 1,
+            },
+          ]}
+        />
+      ) : null}
     </main>
   );
 }

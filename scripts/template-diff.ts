@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import {
   BASELINE_FILE,
   clasificar,
+  commitDeOrigen,
   commitsClasificados,
   contenidoBaseline,
   gitEn,
@@ -16,10 +17,10 @@ import {
 /**
  * `pnpm template:diff` — ¿qué arreglos del template le faltan a esta tienda?
  *
- * Los repos creados con "Use this template" **no reciben** los commits
- * posteriores del template (NEW-STORE.md). Si arreglás un bug de checkout acá,
- * las tiendas ya creadas no se enteran, y con tres o cuatro andando nadie se
- * acuerda de cuál tiene qué.
+ * Los repos creados con "Use this template" no reciben **solos** los commits
+ * posteriores del template: les llegan como PR `template/sync` cuando se
+ * publica una versión (`distribuir.yml`), o a mano con `pnpm template:sync`.
+ * Esto dice qué les falta mientras tanto.
  *
  * El problema para calcular eso: un repo hecho desde un template **no comparte
  * historia** con el original — arranca de un commit inicial propio. O sea que
@@ -31,13 +32,13 @@ import {
  *
  *   pnpm template:diff              # qué commits del template no están acá
  *   pnpm template:diff --marcar     # "ya me puse al día": guarda el SHA actual
+ *   pnpm template:diff --marcar --origen  # el commit del que salió la tienda
  *
  * Sin baseline todavía, igual sirve: compara los archivos de la maquinaria
  * contra el template y te dice cuáles difieren.
  *
- * Traer esos commits era, hasta acá, cherry-pick manual. `pnpm template:sync`
- * (`template-sync.ts`) automatiza justamente eso reusando la clasificación de
- * este módulo (ver `template-shared.ts`).
+ * Traerlo es `pnpm template:sync` (`template-sync.ts`), archivo por archivo
+ * desde el mismo baseline (ver `template-shared.ts`).
  */
 
 // Re-exportado tal cual para que nada de afuera (tests incluidos) tenga que
@@ -48,16 +49,22 @@ export type Opciones = {
   remoto: string;
   rama: string;
   marcar: boolean;
+  /** Con `--marcar`: el commit del que salió la tienda, no la punta del template. */
+  origen: boolean;
 };
 
 export function parseArgs(argv: string[]): Opciones {
-  const opciones: Opciones = { remoto: 'template', rama: 'main', marcar: false };
+  const opciones: Opciones = { remoto: 'template', rama: 'main', marcar: false, origen: false };
 
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
 
     if (flag === '--marcar') {
       opciones.marcar = true;
+      continue;
+    }
+    if (flag === '--origen') {
+      opciones.origen = true;
       continue;
     }
     if (flag === '--remoto' || flag === '--rama') {
@@ -105,9 +112,19 @@ function main(): void {
   const cabezaTemplate = git('rev-parse', ref).trim();
 
   if (opciones.marcar) {
-    writeFileSync(BASELINE_FILE, contenidoBaseline(cabezaTemplate));
+    const marca = opciones.origen ? commitDeOrigen(process.cwd(), ref) : cabezaTemplate;
+    if (!marca) {
+      console.error(
+        `\n✗ Ningún commit de ${ref} tiene el árbol del primer commit de esta tienda.\n` +
+          '  Pasa con un repo que ya existía (bootstrap:repo). Buscá a mano de qué commit\n' +
+          `  del template salió y escribilo en ${BASELINE_FILE}.\n`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    writeFileSync(BASELINE_FILE, contenidoBaseline(marca));
     console.log(
-      `\n✓ ${BASELINE_FILE} apunta a ${cabezaTemplate.slice(0, 12)}.\n` +
+      `\n✓ ${BASELINE_FILE} apunta a ${marca.slice(0, 12)}.\n` +
         '  Commiteá ese archivo: es lo que hace que la próxima corrida sepa desde dónde mirar.\n',
     );
     return;
@@ -141,34 +158,30 @@ function main(): void {
 
   console.log(
     `\n  * = toca la maquinaria (${MAQUINARIA.join(', ')}): son los que toda tienda quiere.\n` +
-      '      El resto suele ser piel —copy, diseño— que cada tienda reescribió a su gusto;\n' +
-      '      cherry-pickearlos puede pisarte el rediseño.\n',
+      '      El resto suele ser piel —copy, diseño— que cada tienda reescribió a su gusto:\n' +
+      '      template:sync la deja como la tenés.\n',
   );
 
   if (mixtos.length > 0) {
     console.log(
       `  ~ = toca ${MIXTOS.join(', ')}: markup tuyo con lógica compartida adentro.\n` +
-        '      No lo cherry-pickees a ciegas —te pisa el rediseño— pero leé el diff:\n' +
+        '      template:sync no los pisa si los cambiaste, pero leé el diff:\n' +
         '      si lo que cambió es la lógica, te falta.\n',
     );
   }
 
   if (deMaquinaria.length > 0) {
     console.log(
-      '  Para traerlos, del más viejo al más nuevo, corré:\n\n' +
+      '  Para traerlos, en una rama (nunca en main):\n\n' +
+        '      pnpm template:sync --dry-run   # qué haría con cada archivo\n' +
         '      pnpm template:sync\n\n' +
-        '  (automatiza el cherry-pick y los conflictos de siempre — fable/, el lockfile,\n' +
-        '  los workflows — y para en cualquier otro conflicto para que lo mires vos.)\n\n' +
-        '  A mano, sería:\n\n' +
-        `    git cherry-pick ${deMaquinaria
-          .map((commit) => commit.sha.slice(0, 12))
-          .reverse()
-          .join(' ')}\n`,
+        '  (archivo por archivo, en un commit: la piel que cambiaste queda, la maquinaria\n' +
+        '  se fusiona, y un choque de verdad deja marcadores para que lo mires vos.)\n',
     );
   }
 
   console.log(
-    'Cuando termines (o si decidís saltearlos a propósito):\n\n' +
+    'Si decidís saltearlos a propósito (template:sync ya lo mueve solo):\n\n' +
       '    pnpm template:diff --marcar\n\n' +
       'Sin eso, los mismos commits vuelven a aparecer la próxima vez.\n',
   );

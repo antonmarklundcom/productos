@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import type React from "react";
 
 import { LogoutButton } from "@/components/admin/logout-button";
+import { countPendingReviews } from "@/domain/reviews";
 import { can } from "@/lib/permissions";
 import { UnauthorizedError, getSession, requireAdmin, type AdminActor } from "@/lib/session";
 import { t } from "@/i18n";
@@ -26,6 +27,13 @@ export default async function PanelLayout({ children }: { children: React.ReactN
     if (error instanceof UnauthorizedError) redirect("/admin/login");
     throw error;
   }
+
+  // Un COUNT sobre una tabla chica: el número en el menú es lo que hace que
+  // alguien entre a moderar. Si la
+  // consulta falla, el menú sale sin número y el panel sigue andando.
+  const resenasPendientes = can(actor.role, "resenas")
+    ? await countPendingReviews().catch(() => 0)
+    : 0;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -51,6 +59,16 @@ export default async function PanelLayout({ children }: { children: React.ReactN
             {can(actor.role, "productos") ? (
               <NavLink href="/admin/productos">{t("panel.nav.productos")}</NavLink>
             ) : null}
+            {can(actor.role, "resenas") ? (
+              <NavLink href="/admin/resenas">
+                {resenasPendientes > 0
+                  ? t("panel.nav.resenasPendientes", { n: resenasPendientes })
+                  : t("panel.nav.resenas")}
+              </NavLink>
+            ) : null}
+            {can(actor.role, "devoluciones") ? (
+              <NavLink href="/admin/devoluciones">{t("panel.nav.devoluciones")}</NavLink>
+            ) : null}
             {can(actor.role, "clientes") ? (
               <NavLink href="/admin/clientes">{t("panel.nav.clientes")}</NavLink>
             ) : null}
@@ -68,6 +86,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
             ) : null}
             {can(actor.role, "banco") ? (
               <NavLink href="/admin/banco">{t("panel.nav.banco")}</NavLink>
+            ) : null}
+            {can(actor.role, "ajustes") ? (
+              <NavLink href="/admin/ajustes">{t("panel.nav.ajustes")}</NavLink>
             ) : null}
             {can(actor.role, "usuarios") ? (
               <NavLink href="/admin/usuarios">{t("panel.nav.usuarios")}</NavLink>

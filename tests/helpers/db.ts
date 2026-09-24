@@ -32,6 +32,11 @@ const TABLES = [
   // cuelgan de algo (FK cascade) para no depender del orden de borrado, igual
   // que el resto de la lista.
   'order_notes',
+  // Reseñas: cuelgan de `orders` y `products`.
+  'product_reviews',
+  // Devoluciones: primero las líneas, después la cabecera.
+  'order_return_items',
+  'order_returns',
   'refunds',
   'price_adjustments',
   'stock_alerts',
@@ -53,6 +58,7 @@ const TABLES = [
   'shipping_methods',
   // Antes que `users`, que la referencia con FK (updated_by).
   'bank_details',
+  'store_settings',
   'users',
   // Antes que `customers`, que la referencia con FK.
   'login_tokens',

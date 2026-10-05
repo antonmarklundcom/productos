@@ -82,11 +82,11 @@ terceros**, porque son cuentas de otro que nadie puede abrir por vos:
 |---|---|---|
 | Hosting y base | hPanel de Hostinger | `DATABASE_URL` y el deploy (DEPLOY.md) |
 | Dominio | tu registrador | `NEXT_PUBLIC_SITE_URL` — el wizard ya lo escribe, falta apuntarlo |
-| Cloudinary | cloudinary.com | fotos de producto y comprobantes de pago |
-| Pagopar | el comercio | sólo si va con tarjeta; sin credenciales el checkout no la ofrece |
+| Cloudinary | cloudinary.com → `/admin/integraciones` | fotos de producto y comprobantes de pago (§4a-ter) |
+| Pagopar | el comercio → `/admin/integraciones` | sólo si va con tarjeta; sin credenciales el checkout no la ofrece |
 | Datos bancarios | `/admin/banco`, con la tienda arriba | a dónde transfieren (§4a) |
 | Fotos y favicon | el comercio | `src/app/favicon.ico` y `/admin/productos` |
-| Medición (opcional) | GA4 / Meta Business | `NEXT_PUBLIC_GA4_ID` y/o `NEXT_PUBLIC_META_PIXEL_ID` — con eso el sitio mide visitas y ventas (evento de compra incluido); vacíos, no carga ni un byte de terceros. Ver `.env.example` |
+| Medición (opcional) | GA4 / Meta Business → `/admin/integraciones` | el ID de GA4 y/o del Pixel — con eso el sitio mide visitas y ventas (evento de compra incluido); vacíos, no carga ni un byte de terceros |
 
 El resto de este documento es el detalle de cada paso: leelo si algo no
 cuadra, o si querés saber por qué el wizard hace lo que hace.
@@ -230,8 +230,14 @@ archivo (`tests/unit/marca-centralizada.test.ts`). Si te grita, la solución es
 leer de `TIENDA`, no agregar una excepción. Y si te salteás este paso entero,
 `pnpm preflight` bloquea: una tienda con `nombre: "TiendaPY"` no cobra.
 
-Cambiá también el favicon (`src/app/favicon.ico`) — eso ningún control lo
-verifica, así que va en la misma pasada.
+**O, mejor, desde el panel:** `/admin/ajustes` → **Identidad** carga el
+nombre, el logo, el favicon y el color de marca con la tienda ya arriba, sin
+tocar código ni redeployar (§4a-quater). Lo de `tienda.ts` queda como default
+de lo que el dueño no cargue, y `pnpm preflight` acepta el nombre de cualquiera
+de los dos lados.
+
+El favicon por defecto es `src/app/favicon.ico`; el que se sube en Identidad lo
+pisa. Ningún control lo verifica, así que va en la misma pasada.
 
 Dos cosas que **no** son por tienda, a propósito: los números de pedido salen
 `PY-000123` en todas las tiendas (el prefijo participa del hash de Pagopar y
@@ -253,6 +259,13 @@ imagen sale relativa y el link se comparte sin foto.
 y el dominio. Lo que falta completar a mano es lo de terceros. La tabla
 entera, para saber qué es cada cosa:
 
+`.env.example` trae **sólo las cinco imprescindibles** (`DATABASE_URL`,
+`SESSION_SECRET`, `NEXT_PUBLIC_SITE_URL`, `CRON_SECRET`, `SETUP_SECRET`):
+Hostinger lo lee y precarga un campo del hPanel por variable, así que ahí no
+puede haber cuarenta y cinco. Las demás de esta tabla son **opcionales** y
+están documentadas con sus trampas en `docs/ENV-OPCIONAL.md`: vacías o
+ausentes, cada una apaga su feature.
+
 | Variable | Qué es |
 |---|---|
 | `DATABASE_URL` | base local (docker) y después la de Hostinger |
@@ -265,9 +278,11 @@ entera, para saber qué es cada cosa:
 | `CRON_SECRET` | **lo genera el wizard.** ≥ 16 caracteres, nuevo por tienda |
 | `SETUP_SECRET` | **lo genera el wizard.** Va sólo en el servidor y sólo durante el primer deploy: habilita `/api/setup/init` y después se borra (DEPLOY.md §4) |
 | `PAGOPAR_*` | credenciales del comercio; vacías = sin tarjeta, o `PAGOPAR_MODE="mock"` para demo |
-| `CUSTOMER_SESSION_SECRET` | **sólo** si esta tienda prende las cuentas de cliente (ver abajo). Otro secreto, nunca una copia de `SESSION_SECRET` |
+| `CUSTOMER_SESSION_SECRET` | opcional: vacío, se deriva de `SESSION_SECRET` (§4b). Si lo cargás, uno propio, nunca una copia de `SESSION_SECRET` |
 
-`.env.example` documenta cada trampa — leelo, no lo adivines.
+`.env.example` y `docs/ENV-OPCIONAL.md` documentan cada trampa — leelos, no
+las adivines. `TEST_DATABASE_URL` (tests de integración, sólo desarrollo) está
+en el README: esa base se borra en cada corrida.
 
 ### 4. Base de datos y catálogo
 
@@ -389,6 +404,71 @@ trae esto por `template:sync` se queda con los suyos: la barra de anuncio, los
 links a las páginas y el contacto nuevo del pie no aparecen hasta sumarlos a
 mano (las páginas en sí sí existen).
 
+### 4a-ter. Integraciones desde el panel: Cloudinary, WhatsApp, Pagopar, medición
+
+**`/admin/integraciones`** (sólo el dueño) carga lo que antes eran variables del
+hPanel, con la tienda ya arriba y sin redeploy:
+
+| Tarjeta | Qué carga | Fallback de entorno |
+|---|---|---|
+| Cloudinary | cloud name, API key, **API secret**, prefijo de carpetas | `CLOUDINARY_*` |
+| WhatsApp | número del comercio (avisos al dueño), phone number ID, **token**, versión de la API, las nueve plantillas | `WHATSAPP_NUMBER`, `WHATSAPP_CLOUD_*` |
+| Pagopar | clave pública, **clave privada**, URL de la API | `PAGOPAR_PUBLIC_KEY`, `PAGOPAR_PRIVATE_KEY`, `PAGOPAR_BASE_URL` |
+| Medición | ID de GA4, ID del Pixel | `NEXT_PUBLIC_GA4_ID`, `NEXT_PUBLIC_META_PIXEL_ID` |
+| Reporte de errores | URL del webhook | `ERROR_REPORT_URL` |
+
+Las reglas, todas en `src/lib/integraciones.ts`:
+
+- **Precedencia: fila de la base > variable de entorno > apagado**, igual que
+  `/admin/banco` con `BANCO_*`. Vacío en el panel = vuelve a mandar el entorno;
+  sin ninguno de los dos, la función queda apagada (nunca rota). El botón
+  "Borrar lo del panel" devuelve una integración entera al entorno.
+- **Las credenciales que van juntas no se mezclan**: si el panel tiene alguna
+  de las de Cloudinary (o de Pagopar, o phone ID + token de WhatsApp), el grupo
+  entero sale del panel. Las plantillas y el prefijo se resuelven de a uno.
+- **Los secretos se guardan cifrados** (AES-256-GCM, clave derivada de
+  `SESSION_SECRET` por HKDF, una por campo) y **nunca vuelven al navegador**: la
+  pantalla muestra "Configurado ••••1234" y sólo deja reemplazar o borrar. Sin
+  `SESSION_SECRET` válido no se lee ni se guarda nada. **Cambiar
+  `SESSION_SECRET` deja ilegibles los secretos guardados** — la pantalla lo dice
+  y hay que volver a cargarlos.
+- **"Probar conexión"** para Cloudinary (ping de la Admin API), WhatsApp (lee
+  el número en la Graph API, no manda nada) y Pagopar (sólo que el host
+  conteste por https: sus claves sólo se verifican con una transacción del
+  sandbox). Cada guardado y cada prueba quedan en el log del hPanel con quién y
+  qué campos, nunca valores.
+- `pnpm preflight` lee las dos fuentes y dice de dónde sale cada valor.
+- `PAGOPAR_MODE`, `CUSTOMER_SESSION_SECRET`, `FACTURAPY_*` y los `OWNER_*` se
+  quedan en el entorno: el modo mock es de desarrollo, el secreto de clientes
+  se deriva solo de `SESSION_SECRET` (§4b), FacturaPY no se usa todavía, y el
+  dueño se crea con
+  `/api/setup/init` o `pnpm create-owner`.
+
+La lectura usa una foto en memoria que se recarga cada 30 segundos y se tira
+al guardar: en el mismo proceso el cambio es inmediato; el CSP del proxy puede
+tardar hasta 30 s en abrirse a un GA4 recién cargado.
+
+### 4a-quater. Identidad desde el panel: nombre, logo, favicon, color
+
+`/admin/ajustes` → **Identidad** (sólo el dueño). Es lo que antes obligaba a
+editar `src/config/tienda.ts` y el tema en cada tienda clonada:
+
+| Campo | Dónde se ve | Vacío |
+|---|---|---|
+| Nombre | header, `<title>` de cada página, Open Graph, remito, mensajes de WhatsApp, feed | `TIENDA.nombre` |
+| Logo | header (reemplaza el nombre en texto) | el nombre en texto |
+| Favicon | la pestaña del navegador | `src/app/favicon.ico` |
+| Color de marca | `--primary` (botones, links, foco); el texto encima se elige solo por contraste | el del tema de `globals.css` |
+
+Logo y favicon van a la carpeta pública `marca/` de Cloudinary (hace falta
+Cloudinary configurado, §4a-ter). El tema completo (tipografía, radios, modo
+oscuro) sigue siendo piel del código (§5): el panel pisa sólo el color de marca.
+
+**Piel rediseñada:** `site-header.tsx` y `site-footer.tsx` del template ya leen
+`marcaEfectiva()` (`src/lib/marca.ts`). Una tienda que rediseñó los suyos los
+conserva en el `template:sync`; para que muestren el nombre y el logo del
+panel, que lean `marcaEfectiva()` en vez de `TIENDA.nombre`.
+
 ### 4b. ¿Esta tienda quiere cuentas de cliente?
 
 **Por defecto no**, y para la mayoría de las tiendas ese default está bien: en
@@ -401,12 +481,18 @@ compró: historial de pedidos, datos guardados para la próxima, y una lista de
 gente que aceptó recibir novedades (la única que se puede usar para promociones
 — comprar no es aceptar que te escriban).
 
-Para prenderla:
+Para prenderla: **`/admin/ajustes` → Cuentas de cliente → "Sí, ofrecerlas"**.
+Nada más — sin tocar código ni el hosting.
 
-1. `cuentasClientes: true` en `src/config/tienda.ts`.
-2. `CUSTOMER_SESSION_SECRET` en el entorno: `openssl rand -base64 32`, **uno
-   nuevo**, distinto de `SESSION_SECRET`. Con el flag prendido y sin este
-   secreto, `/cuenta` rompe con un error explícito — a propósito.
+- El default (lo que se usa mientras el dueño no elija) sale de
+  `cuentasClientes` en `src/config/tienda.ts`, apagado de fábrica.
+- **Ya no hace falta `CUSTOMER_SESSION_SECRET`**: vacío, el secreto de las
+  sesiones de cliente se deriva de `SESSION_SECRET` con HKDF (es otro secreto,
+  independiente del del panel). Una tienda que ya lo tiene cargado sigue usando
+  el suyo. Si `SESSION_SECRET` no es válido, el panel lo avisa y `/cuenta` no
+  anda — a propósito.
+- Todo el código decide con `cuentasClientesHabilitadas()` de
+  `src/lib/cuentas.ts` (async); la de `tienda.ts` quedó como legacy.
 
 Con el flag apagado, `/cuenta/*` responde 404, el header no muestra nada y el
 checkout es exactamente el de siempre. Hay un test de CI
@@ -439,7 +525,7 @@ implica antes de prometérselo a un cliente:
    persona, Meta no permite texto libre, y un código de login siempre cae
    fuera. La aprobación puede tardar días.
 
-Las variables están en `.env.example` (`WHATSAPP_CLOUD_*`).
+Las variables están en `docs/ENV-OPCIONAL.md` (`WHATSAPP_CLOUD_*`).
 
 **En dev no hace falta nada de esto:** sin credenciales y con
 `NODE_ENV != production`, el código se imprime en la consola del servidor y el
@@ -1017,6 +1103,16 @@ La `0013` (plan de crecimiento, fase O14) agrega una sola columna,
 el recordatorio de pago. Nullable, sin backfill — un pedido viejo sin la marca
 es exactamente lo que corresponde. Sin ella, la tienda anda igual; lo que no
 anda es el recordatorio que agrega O15.
+
+La `0017` (integraciones desde el panel, §4a-ter) crea una tabla nueva,
+`integration_settings`, vacía. **Una tienda existente no pierde nada**: sin
+filas, cada integración sale de sus variables de entorno exactamente como
+antes, así que el PR `template/sync` se mergea, se corre el setup y la tienda
+sigue igual. Pasar una integración al panel es opcional y se hace de a una:
+cargarla en `/admin/integraciones`, probar la conexión, y recién después borrar
+esas variables del hPanel (Redeploy), para no dejar dos verdades. Si la tienda
+sincroniza el código antes de migrar, la lectura de la tabla falla en silencio
+(queda en el log) y todo sigue saliendo del entorno.
 
 Sigue valiendo lo de siempre: Dependabot no mueve nada de esto y las columnas
 no se agregan a mano en el hPanel — la migración es la única fuente.

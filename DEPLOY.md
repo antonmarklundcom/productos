@@ -32,10 +32,24 @@ En el hPanel, dentro del sitio:
    deploy y verificá que quedaron guardados: el panel a veces los vuelve a su
    valor detectado si guardás la sección dos veces.
 
-3. **Environment variables**: cargá una por una las de `.env.example` que la
-   tienda necesita — `DATABASE_URL`, `SESSION_SECRET`, `CRON_SECRET`,
-   `WHATSAPP_NUMBER`, `CLOUDINARY_*`, `NEXT_PUBLIC_SITE_URL`, `PAGOPAR_*` si va
-   con tarjeta, y `NODE_ENV=production`.
+3. **Environment variables**: Hostinger lee `.env.example` y precarga un campo
+   por variable. Son **sólo las cinco imprescindibles** —`DATABASE_URL`,
+   `SESSION_SECRET`, `NEXT_PUBLIC_SITE_URL`, `CRON_SECRET` y `SETUP_SECRET`—
+   más `NODE_ENV=production`, que lo pone el hosting (si no, agregalo). Los
+   valores los imprime `pnpm nueva-tienda` listos para pegar; `DATABASE_URL`
+   sale de la base del §2.
+
+   Todo lo demás es **opcional** y está documentado, con sus trampas, en
+   [docs/ENV-OPCIONAL.md](./docs/ENV-OPCIONAL.md): `WHATSAPP_NUMBER`,
+   `CLOUDINARY_*`, `PAGOPAR_*` si va con tarjeta, `WHATSAPP_CLOUD_*`, GA4/Pixel,
+   `ERROR_REPORT_URL`. Agregá a mano (botón "Add") sólo las que esta tienda
+   usa; vacía o ausente, cada una apaga su feature y no rompe nada.
+
+   Mejor todavía: **no las cargues en el hPanel**. Cloudinary, WhatsApp
+   (número y Cloud API), Pagopar, GA4/Pixel y `ERROR_REPORT_URL` se cargan
+   desde `/admin/integraciones` con la tienda arriba, cifrados en la base y sin
+   Redeploy (NEW-STORE.md §4a-ter). Las variables siguen funcionando como
+   fallback: lo que se carga en el panel manda sobre ellas.
 
    Los `BANCO_*` **ya no hacen falta acá**: los datos bancarios se cargan una
    vez desde `/admin/banco` con la tienda arriba, y eso es lo que conviene —
@@ -202,7 +216,15 @@ símbolos raros.
 ## 4. Primer deploy de una tienda nueva
 
 Sin SSH y sin Node instalado en el servidor: la app que ya está corriendo se
-inicializa sola con un curl.
+inicializa sola.
+
+**El camino corto, sin terminal:** con `SETUP_SECRET` cargado y la app
+deployada, abrí **`https://DOMAIN/setup`**, pegá el secreto, el email y la
+contraseña del dueño, y apretá "Inicializar". Es exactamente el mismo POST que
+el curl de abajo (mismo candado, misma respuesta: los pasos y lo que falta para
+cobrar). Sin `SETUP_SECRET` esa página no existe. El curl sigue sirviendo para
+lo que el formulario no ofrece (las zonas de envío en bloque, o para
+automatizarlo).
 
 1. **Cargá las variables** en el hPanel (punto 1), incluida `SETUP_SECRET` —
    mínimo 16 caracteres, `openssl rand -base64 32`.

@@ -14,6 +14,8 @@ import { getAvailability } from './stock';
 import { resolveMessageSender, type MessageSender } from './messaging';
 import { withTimeout } from './notify-timing';
 import { log, mensajeDe } from '@/lib/log';
+import { valorIntegracion } from "@/lib/integraciones";
+import { nombreTienda } from '@/lib/marca';
 
 /**
  * "Avisame cuando haya stock" (plan-operacion §5.2 E).
@@ -60,7 +62,7 @@ export const PURGE_AFTER_DAYS = 90;
 
 /** El nombre de la plantilla de Meta, o `null` si esta tienda no la cargó. */
 export function stockAlertTemplate(): string | null {
-  return process.env.WHATSAPP_CLOUD_TEMPLATE_STOCK_DISPONIBLE?.trim() || null;
+  return valorIntegracion("whatsapp", "plantillaStockDisponible");
 }
 
 export type StockAlertNotifier = { sender: MessageSender; templateName?: string };
@@ -175,7 +177,7 @@ export async function notifyBackInStock(
 
     if (pendientes.length === 0) return { marcadas: 0, enviadas: 0 };
 
-    const body = backInStockBody(producto);
+    const body = backInStockBody(producto, await nombreTienda());
     let marcadas = 0;
     let enviadas = 0;
 
@@ -291,12 +293,12 @@ export async function purgeNotifiedStockAlerts(
 export type BackInStockProduct = { productName: string; label: string; slug: string };
 
 /** El texto del aviso. Separado del envío para testearlo sin red. */
-export function backInStockBody(producto: BackInStockProduct): string {
+export function backInStockBody(producto: BackInStockProduct, tienda: string = TIENDA.nombre): string {
   const lineas = [
     t('wa.stock.disponible', {
       producto: producto.productName,
       etiqueta: producto.label,
-      tienda: TIENDA.nombre,
+      tienda,
     }),
   ];
 

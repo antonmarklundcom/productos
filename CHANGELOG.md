@@ -25,6 +25,37 @@ funciones nuevas; **parche** para arreglos.
 
 ## Sin publicar
 
+- **Identidad desde el panel** (`/admin/ajustes` → Identidad): nombre, logo,
+  favicon y color de marca, sin tocar `tienda.ts` ni redeployar. `tienda.ts`
+  queda como default. Todo lo que mostraba `TIENDA.nombre` (header, títulos,
+  Open Graph, remito, mensajes, feed) lee ahora `nombreTienda()`.
+- **Cuentas de cliente desde el panel** (`/admin/ajustes` → Cuentas de
+  cliente), y **`CUSTOMER_SESSION_SECRET` ya no hace falta**: vacío, se deriva
+  de `SESSION_SECRET` con HKDF. Las tiendas que lo tienen cargado siguen igual.
+  `cuentasClientesHabilitadas()` se mudó a `src/lib/cuentas.ts` y es async.
+- **`/setup`**: la configuración inicial desde el navegador (mismo POST que el
+  curl a `/api/setup/init`; sólo existe con `SETUP_SECRET` puesto).
+- Sin migración: todo vive en `store_settings` (JSON). Piel rediseñada: ver
+  NEW-STORE.md §4a-quater para que header y pie propios lean el nombre y el
+  logo del panel.
+- **Integraciones desde el panel (`/admin/integraciones`, sólo el dueño).
+  Migración: sí (`0017`, tabla nueva `integration_settings`).** Cloudinary,
+  WhatsApp (número del comercio, Cloud API y plantillas), Pagopar, GA4/Pixel y
+  el reporte de errores se cargan sin tocar el hPanel ni redeployar. Precedencia
+  panel > entorno > apagado; secretos cifrados con AES-256-GCM (clave derivada
+  de `SESSION_SECRET`), nunca devueltos al navegador; "Probar conexión";
+  `pnpm preflight` dice de dónde sale cada valor; el CSP sigue a la medición
+  efectiva. **Las tiendas existentes no tienen que hacer nada**: sin filas en
+  la tabla, todo sale de sus variables de entorno como antes. Después del sync,
+  correr el setup para aplicar la migración (NEW-STORE.md § "Migraciones que
+  llegan por `template:sync`").
+- **`.env.example` mínimo:** trae sólo las cinco imprescindibles
+  (`DATABASE_URL`, `SESSION_SECRET`, `NEXT_PUBLIC_SITE_URL`, `CRON_SECRET`,
+  `SETUP_SECRET`), porque Hostinger lo lee y precarga un campo del hPanel por
+  variable. Las demás —con los mismos comentarios— se mudaron a
+  `docs/ENV-OPCIONAL.md`; `TEST_DATABASE_URL` pasó al README. **Una tienda
+  existente no tiene que hacer nada**: las variables que ya cargó en el hPanel
+  siguen funcionando igual, ninguna cambió de nombre ni de significado.
 - **`template:sync` trae la maquinaria que le falta a la tienda**, aunque el
   template no la haya cambiado desde el baseline. Antes sólo miraba lo que
   cambió en `baseline..objetivo`, y un baseline marcado "al día" con archivos

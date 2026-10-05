@@ -193,6 +193,10 @@ const GUARD_ESPERADO: Readonly<Record<string, 'Admin' | 'Staff' | 'Owner'>> = {
   // log de plata: la tienda sigue andando igual y el dueño se entera cuando
   // mira su banco. No se delega.
   guardarDatosBancarios: 'Owner',
+  // Integraciones: credenciales de Cloudinary, WhatsApp y Pagopar. Owner.
+  guardarIntegracionAccion: 'Owner',
+  volverAlEntornoAccion: 'Owner',
+  probarIntegracionAccion: 'Owner',
   subirQrBancario: 'Owner',
   quitarQrBancario: 'Owner',
 
@@ -202,6 +206,9 @@ const GUARD_ESPERADO: Readonly<Record<string, 'Admin' | 'Staff' | 'Owner'>> = {
   guardarAjustes: 'Owner',
   restaurarAjustes: 'Owner',
   subirImagenPortada: 'Owner',
+  // Logo y favicon: la cara de la tienda, como la portada.
+  subirImagenMarca: 'Owner',
+  quitarImagenMarca: 'Owner',
   quitarImagenPortada: 'Owner',
 
   // El flete es plata que entra en cada pedido, y el error se cobra en

@@ -11,22 +11,40 @@ El orden importa. Cada sección de acá abajo salió de algo que ya rompió una 
 
 ## 1. Conectar el repo (git deploy)
 
+### Productos: publicar desde `main`
+
+Seleccioná explícitamente `main` en Hostinger: la rama por defecto de GitHub
+puede seguir siendo `claude/happy-shannon-9v9c44`. `main` incluye el build con
+webpack (`pnpm build`) y el pin de pnpm compatible con Hostinger. No uses
+`next build` directamente: omite `--webpack` y vuelve a Turbopack, cuyo worker
+de PostCSS falló en este hosting compartido.
+
+Después de guardar la rama y los comandos, ejecutá **Redeploy** y comprobá
+que el log muestra `next build --webpack`, termina correctamente y arranca
+`next start`. Verificá `/`, `/api/health` y `/api/version`: la portada debe
+tener HTML y health debe devolver JSON. `/api/version` requiere autorización
+con `CRON_SECRET`: sin ella debe rechazar el acceso; con ella debe identificar
+el commit de `main` desplegado. Un HTTP 200 con cuerpo vacío **no** es un deploy sano.
+Si las tres rutas devuelven cero bytes, revisá el log de arranque y el enlace
+del dominio a la app Node.js en hPanel; ese resultado no confirma que Next
+esté atendiendo. No inicialices ni resetees la base para corregirlo.
+
 En el hPanel, dentro del sitio:
 
 1. **Websites → tu sitio → Advanced → GIT**: pegá la URL del repo y la rama
    (`main`). Si el repo es privado, copiá la clave pública que muestra
-   Hostinger y cargala como *deploy key* en GitHub (Settings → Deploy keys).
+   Hostinger y cargala como _deploy key_ en GitHub (Settings → Deploy keys).
 2. **Node.js**: versión **22** (la misma de `.nvmrc` y del CI), y los comandos:
 
-   | Campo | Valor |
-   |---|---|
+   | Campo           | Valor                            |
+   | --------------- | -------------------------------- |
    | Install command | `pnpm install --frozen-lockfile` |
-   | Build command | `pnpm build` |
-   | Start command | `pnpm start` |
+   | Build command   | `pnpm build`                     |
+   | Start command   | `pnpm start`                     |
 
    **Los tres hay que escribirlos a mano.** Hostinger detecta el proyecto y
    propone `npm install` / `npm run build` / `npm start`, y con eso el deploy
-   *parece* andar: npm ignora `pnpm-lock.yaml`, resuelve el árbol de nuevo por
+   _parece_ andar: npm ignora `pnpm-lock.yaml`, resuelve el árbol de nuevo por
    su cuenta y te deja en producción versiones que nadie testeó — o directamente
    se cae contra `pnpm-workspace.yaml`. Pisá los tres campos antes del primer
    deploy y verificá que quedaron guardados: el panel a veces los vuelve a su
@@ -222,9 +240,36 @@ inicializa sola con un curl.
    {
      "owner": { "email": "...", "password": "..." },
      "zonas": [
-       { "slug": "asuncion", "name": "Asunción", "cities": ["Asunción"], "pricePyg": 25000, "freeThresholdPyg": 500000 },
-       { "slug": "gran-asuncion", "name": "Gran Asunción", "cities": ["San Lorenzo", "Fernando de la Mora", "Luque", "Lambaré", "Capiatá", "Ñemby", "Mariano Roque Alonso", "Villa Elisa", "Limpio"], "pricePyg": 35000, "freeThresholdPyg": 700000 },
-       { "slug": "interior", "name": "Interior", "cities": [], "pricePyg": 60000 }
+       {
+         "slug": "asuncion",
+         "name": "Asunción",
+         "cities": ["Asunción"],
+         "pricePyg": 25000,
+         "freeThresholdPyg": 500000
+       },
+       {
+         "slug": "gran-asuncion",
+         "name": "Gran Asunción",
+         "cities": [
+           "San Lorenzo",
+           "Fernando de la Mora",
+           "Luque",
+           "Lambaré",
+           "Capiatá",
+           "Ñemby",
+           "Mariano Roque Alonso",
+           "Villa Elisa",
+           "Limpio"
+         ],
+         "pricePyg": 35000,
+         "freeThresholdPyg": 700000
+       },
+       {
+         "slug": "interior",
+         "name": "Interior",
+         "cities": [],
+         "pricePyg": 60000
+       }
      ]
    }
    ```
@@ -242,7 +287,7 @@ inicializa sola con un curl.
    por `/admin/productos` → Importar planilla.
 
    Responde con el resultado de cada paso **y con el reporte completo de `pnpm
-   preflight`**, medido contra el entorno de este servidor — que es el único
+preflight`**, medido contra el entorno de este servidor — que es el único
    que importa.
 
    Las zonas son upsert por `slug`, así que repetir la llamada actualiza en vez de duplicar.
@@ -311,11 +356,11 @@ interpreta la hora del cron en **UTC**, y Paraguay está en **UTC−3 todo el
 año** (sin horario de verano desde 2024) — la columna de la derecha ya trae
 la resta hecha:
 
-| Ruta | Frecuencia | Hora Asunción | Hora UTC (expresión cron) | Qué hace si falta la variable |
-|---|---|---|---|---|
-| `/api/cron/vencer-pedidos` | cada 15 min | — | `*/15 * * * *` | Sin `CRON_SECRET` (≥16 caracteres), 503: nunca vence nada sin secreto. Desde O15 manda además los recordatorios de pago; sin su plantilla, no manda ninguno y vence igual |
-| `/api/cron/resumen-diario` | diaria | 08:00 | `0 11 * * *` | Sin `WHATSAPP_CLOUD_TEMPLATE_RESUMEN_DIARIO`, corre igual y no manda nada (`sent: false`) |
-| `/api/cron/backup` | diaria | 03:00 | `0 6 * * *` | Sin credenciales de Cloudinary, se saltea sola (`skipped: "sin_cloudinary"`) |
+| Ruta                       | Frecuencia  | Hora Asunción | Hora UTC (expresión cron) | Qué hace si falta la variable                                                                                                                                             |
+| -------------------------- | ----------- | ------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/cron/vencer-pedidos` | cada 15 min | —             | `*/15 * * * *`            | Sin `CRON_SECRET` (≥16 caracteres), 503: nunca vence nada sin secreto. Desde O15 manda además los recordatorios de pago; sin su plantilla, no manda ninguno y vence igual |
+| `/api/cron/resumen-diario` | diaria      | 08:00         | `0 11 * * *`              | Sin `WHATSAPP_CLOUD_TEMPLATE_RESUMEN_DIARIO`, corre igual y no manda nada (`sent: false`)                                                                                 |
+| `/api/cron/backup`         | diaria      | 03:00         | `0 6 * * *`               | Sin credenciales de Cloudinary, se saltea sola (`skipped: "sin_cloudinary"`)                                                                                              |
 
 Las tres comparten el mismo `CRON_SECRET` (`src/lib/cron-auth.ts`): 503 sin
 secreto configurado, comparación en tiempo constante, rate-limited, header

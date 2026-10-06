@@ -13,6 +13,13 @@ El orden importa. Cada sección de acá abajo salió de algo que ya rompió una 
 
 ### Productos: publicar desde `main`
 
+`.env.example` contiene sólo cinco variables de arranque; las otras cuarenta
+están documentadas en `docs/ENV-OPCIONAL.md`. Actualizar el repo no garantiza
+que hPanel borre campos guardados anteriormente. Revisá los campos opcionales
+existentes y quitá los vacíos que no usás; conservá cualquier integración
+configurada. No cargues `TEST_DATABASE_URL` en producción. El panel de
+integraciones del template todavía no forma parte de esta versión.
+
 Seleccioná explícitamente `main` en Hostinger: la rama por defecto de GitHub
 puede seguir siendo `claude/happy-shannon-9v9c44`. `main` incluye el build con
 webpack (`pnpm build`) y el pin de pnpm compatible con Hostinger. No uses
